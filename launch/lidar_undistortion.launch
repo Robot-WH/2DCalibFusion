@@ -1,0 +1,23 @@
+
+
+<launch>
+
+    <!-- 使用bag的时间戳 -->
+    <param name="use_sim_time" value="true" />
+
+    <!-- base_link to front_laser_link -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="link_broadcaster1" 
+        args="0 0 0 0 0 0 footprint base_link" />
+    <node pkg="tf2_ros" type="static_transform_publisher" name="link_broadcaster2" 
+        args="0 0 0.254 0 0 3.1415926 base_link front_laser_link" />
+
+    <!-- 启动节点 -->
+    <node name="preprocess_node" pkg="CalibFusion2D" type="preprocess_node" output="screen" >
+         <rosparam file="$(find CalibFusion2D)/config/lidar_undistortion.yaml" command="load"/>
+    </node>
+
+    <!-- launch rviz -->
+    <node name="rviz" pkg="rviz" type="rviz" required="true"
+        args="-d $(find CalibFusion2D)/config/hector_slam.rviz" />
+
+</launch>

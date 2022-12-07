@@ -1,0 +1,16 @@
+# 传感器外参
+extrinsic:
+  odom: 
+    prime_laser: 
+      upside_down: true  # 倒置 
+      level: [0, 0, 0]   # 主激光雷达 - odom的外参  x,y,theta
+
+# 栅格地图多分辨率金字塔   
+grid_map_pyramid:
+  bottom_resolution: 0.05
+  map_size:
+      x: 2048
+      y: 2048
+  map_depth: 3 # 金子塔层数
+    
+          

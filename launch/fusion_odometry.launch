@@ -1,0 +1,15 @@
+
+
+<launch>
+
+    <!-- 使用bag的时间戳 -->
+    <param name="use_sim_time" value="true" />
+
+    <include file="$(find CalibFusion2D)/launch/hector_slam.launch"/>
+
+    <!-- 启动节点 filter_fusion_odometry_node optimization_fusion_odometry_node simple_fusion_node-->
+    <node name="simple_fusion_node" pkg="CalibFusion2D" type="simple_fusion_node" output="screen" >
+    </node>
+
+</launch>
+
