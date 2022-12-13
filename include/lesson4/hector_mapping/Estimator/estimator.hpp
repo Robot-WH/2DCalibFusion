@@ -174,10 +174,10 @@ protected:
 
                     if (imu_selected.empty()) {
                         if (wheel_odom_selected.empty()) {
-                            std::cout << "使用运动学模型预测 ..." << std::endl; 
+                            std::cout << common::YELLOW << "使用运动学模型预测 ..." << common::RESET << std::endl; 
                             // 没有轮速数据则用运动学模型预测
                         } else {
-                            std::cout << "使用轮速计预测 ..." << std::endl; 
+                            std::cout << common::GREEN << "使用轮速计预测 ..." << common::RESET << std::endl; 
                             // 使用轮速进行预测
                             for (uint16_t i = 0; i < wheel_odom_selected.size(); ++i) {
                                 const auto& curr_data = wheel_odom_selected[i]; 
@@ -232,9 +232,9 @@ protected:
                             obs_cov(2, 2) = 0.0003;    // yaw方差   1度
                             // 进行观测校正
                             estimator_.Correct(new_estimate_odom_pose, obs_cov, curr_laser_ptr->end_time_); 
-                            // new_estimate_odom_pose = estimator_.ReadPosterioriPose();
+                            new_estimate_odom_pose = estimator_.ReadPosterioriPose();
                             // // 更新对应laser坐标
-                            // poseOdomToPrimeLaserOdom(new_estimate_odom_pose, new_estimate_laserOdom_pose);
+                            poseOdomToPrimeLaserOdom(new_estimate_odom_pose, new_estimate_laserOdom_pose);
                         }
                     }
 

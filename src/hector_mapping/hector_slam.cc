@@ -296,8 +296,8 @@ void HectorMappingRos::scanCallback(const sensor_msgs::LaserScan &scan) {
  * @brief: 接收融合算法计算的结果 
  */
 void HectorMappingRos::FusionOdomResultCallback(const TimedPose2d& data) {
-    std::cout << common::YELLOW << "FusionOdom ----------------------------" 
-    << common:: RESET << std::endl;
+    // std::cout << common::YELLOW << "FusionOdom ----------------------------" 
+    // << common:: RESET << std::endl;
     if (data.time_stamp_ < 0) return;  
 
     geometry_msgs::PoseWithCovarianceStamped pose_info = 
@@ -349,8 +349,8 @@ void HectorMappingRos::wheelOdomDeadReckoningCallback(const TimedPose2d& pose) {
 }
 // 接收到去畸变的点云
 void HectorMappingRos::undistortedPointcloudCallback(const LaserPointCloud::Ptr& data) {
-    std::cout << common::GREEN << "send undistortedPointcloud ----------------------------" 
-    << common::RESET << std::endl;
+    // std::cout << common::GREEN << "send undistortedPointcloud ----------------------------" 
+    // << common::RESET << std::endl;
     sensor_msgs::PointCloud pointcloud_msg;
     uint16_t size = data->pointcloud_.size(); 
     pointcloud_msg.points.reserve(size);

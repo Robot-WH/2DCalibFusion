@@ -93,6 +93,7 @@ public:
         if (std::fabs(time_stamp - last_time_) >= 1e-3) {
             throw "EKF correct time error!";
         }
+
         last_time_ = time_stamp;  
         std::cout << "obs: " << obs.ReadVec().transpose() << std::endl;
         Eigen::Matrix3f H; // 观测jacobian
@@ -101,9 +102,18 @@ public:
         C.setIdentity(); 
         Eigen::MatrixXf K = state_.cov_ * H.transpose() * 
                                                 (H * state_.cov_ * H.transpose() + C * obs_cov * C.transpose()).inverse();
-        state_.X_ = state_.X_ + K * (obs.ReadVec() - H * state_.X_);   // 后验均值
+        Eigen::MatrixXf diff_obs = obs.ReadVec() - H * state_.X_;
+        
+        if (diff_obs(2, 0) > M_PI) {
+            diff_obs(2, 0) = diff_obs(2, 0) - 2 * M_PI; 
+        } else if (diff_obs(2, 0) < -M_PI) {
+            diff_obs(2, 0) =  2 * M_PI + diff_obs(2, 0); 
+        }
+
+        state_.X_ = state_.X_ + K * diff_obs;   // 后验均值
         Eigen::MatrixXf I_KH = Eigen::Matrix3f::Identity() - K * H;
-        state_.cov_ = I_KH * state_.cov_ * I_KH.transpose() + K * C * obs_cov * C.transpose() * K.transpose();    // 后验方差
+        state_.cov_ = I_KH * state_.cov_ * I_KH.transpose() + 
+                                    K * C * obs_cov * C.transpose() * K.transpose();    // 后验方差
         last_posteriori_pose_.SetX(state_.X_[0]);
         last_posteriori_pose_.SetY(state_.X_[1]);
         last_posteriori_pose_.SetRotation(state_.X_[2]);
