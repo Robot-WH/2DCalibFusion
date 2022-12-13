@@ -94,9 +94,6 @@ public:
         wheel_sm_.lock();   // 写锁 
         wheelOdom_cache_.push_back(data);
         wheel_sm_.unlock();  
-        diff_model.Update(data.time_stamp_, data.v_x_, data.omega_yaw_);
-        // 发布轮速运动解算结果
-        util::DataDispatcher::GetInstance().Publish("WheelDeadReckoning", diff_model.ReadLastPose().pose_); 
         // // 检测laser是否有数据， 若laser 没数据， 则退化为 odom/imu融合里程计
         // wheel_sm_.lock_shared();    // 读锁
         // if (laser_cache_.empty()) {
@@ -203,6 +200,10 @@ protected:
                     // 发布去畸变后的点云
                     util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", curr_laser_ptr); 
                     Pose2d predict_odom_pose = last_fusionOdom_pose_.pose_ * predict_incre_pose;   // To<-last * Tlast<-curr
+                    last_predictOdom_pose_.pose_ = last_predictOdom_pose_.pose_ * predict_incre_pose;
+                    last_predictOdom_pose_.time_stamp_ = curr_laser_ptr->end_time_; 
+                    // 发布轮速运动解算结果
+                    util::DataDispatcher::GetInstance().Publish("WheelDeadReckoning", last_predictOdom_pose_); 
                     // std::cout << "odom predict: " << predict_odom_pose.Vec().transpose() << std::endl;
                     // 将点云数据转换为栅格金字塔数据
                     getGridPyramidData(*curr_laser_ptr);  
@@ -405,8 +406,6 @@ protected:
         }
     }
 
-    
-    
     float getScaleToMap() const { return mapRep->getScaleToMap(); };    // 返回第 0层的scale  
 
 private:
@@ -427,6 +426,7 @@ private:
     // Eigen::Isometry3f primeLaserOdomExtrinsic_;  
     Pose2d last_map_updata_pose_;
     TimedPose2d last_fusionOdom_pose_;
+    TimedPose2d last_predictOdom_pose_;
     Eigen::Matrix3f lastScanMatchCov;
 
     float paramMinDistanceDiffForMapUpdate;

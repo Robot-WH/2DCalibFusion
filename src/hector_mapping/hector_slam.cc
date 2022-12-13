@@ -296,6 +296,8 @@ void HectorMappingRos::scanCallback(const sensor_msgs::LaserScan &scan) {
  * @brief: 接收融合算法计算的结果 
  */
 void HectorMappingRos::FusionOdomResultCallback(const TimedPose2d& data) {
+    std::cout << common::YELLOW << "FusionOdom ----------------------------" 
+    << common:: RESET << std::endl;
     if (data.time_stamp_ < 0) return;  
 
     geometry_msgs::PoseWithCovarianceStamped pose_info = 
@@ -323,7 +325,7 @@ void HectorMappingRos::FusionOdomResultCallback(const TimedPose2d& data) {
         tmp.header = pose_info.header;
         // tmp.header.stamp = ros::Time::now();
         tmp.header.frame_id = odomFrame_name_;       // 基准坐标
-        tmp.child_frame_id = baseFrame_name_;
+        // tmp.child_frame_id = baseFrame_name_;
         odometryPublisher_.publish(tmp);
     }
 }
@@ -333,21 +335,22 @@ void HectorMappingRos::lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 
     std::cout << "Recieve lidar-odom extrinsic : " << ext_prime_laser_to_odom_.transpose() <<std::endl;
 } 
 // 原始wheel 航迹推算，调试用
-void HectorMappingRos::wheelOdomDeadReckoningCallback(const Pose2d& pose) {
+void HectorMappingRos::wheelOdomDeadReckoningCallback(const TimedPose2d& pose) {
     geometry_msgs::PoseWithCovarianceStamped pose_info = 
-        RosUtils::GetPoseWithCovarianceStamped(Eigen::Vector3f{pose.GetX(), pose.GetY(), pose.GetYaw()}, 
+        RosUtils::GetPoseWithCovarianceStamped(Eigen::Vector3f{pose.pose_.GetX(), pose.pose_.GetY(), pose.pose_.GetYaw()}, 
                                                                                                 Eigen::Matrix3f::Zero(), 
-                                                                                                ros::Time::now(), odomFrame_name_); 
+                                                                                                ros::Time(pose.time_stamp_), odomFrame_name_); 
     nav_msgs::Odometry tmp;
     tmp.pose = pose_info.pose;
-    tmp.header.stamp = ros::Time::now();
+    tmp.header.stamp = ros::Time(pose.time_stamp_);
     tmp.header.frame_id = odomFrame_name_;       // 基准坐标
-    tmp.child_frame_id = baseFrame_name_;
+    // tmp.child_frame_id = baseFrame_name_;
     wheelOdomDeadReckoningPublisher_.publish(tmp);
 }
 // 接收到去畸变的点云
 void HectorMappingRos::undistortedPointcloudCallback(const LaserPointCloud::Ptr& data) {
-    // std::cout << "send undistortedPointcloud ----------------------------" << std::endl;
+    std::cout << common::GREEN << "send undistortedPointcloud ----------------------------" 
+    << common::RESET << std::endl;
     sensor_msgs::PointCloud pointcloud_msg;
     uint16_t size = data->pointcloud_.size(); 
     pointcloud_msg.points.reserve(size);
