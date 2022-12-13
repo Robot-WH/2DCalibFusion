@@ -36,9 +36,9 @@ public:
      * @return  
      */
     virtual Eigen::Vector3f Solve(const Eigen::Vector3f& beginEstimateWorld, 
-                                                                const std::vector<LaserPointContainer> &dataContainers, 
-                                                                MapRepMultiMap &map, 
-                                                                Eigen::Matrix3f &covMatrix) {
+                                                                const std::vector<LaserPointContainer>& dataContainers, 
+                                                                MapRepMultiMap& map, 
+                                                                Eigen::Matrix3f& covMatrix) {
         // std::cout << "hectorScanMatcher::solve" <<std::endl;
         size_t size = map.GetMapLevels();
         Eigen::Vector3f tmp(beginEstimateWorld);
@@ -64,11 +64,12 @@ private:
      * @param maxIterations   最大迭代次数
      * @return
      */
-    Eigen::Vector3f matchData(const Eigen::Vector3f &beginEstimateWorld, 
-                                                            const GridMap &grid_map, 
-                                                            const LaserPointContainer &dataContainer, 
-                                                            Eigen::Matrix3f &covMatrix, 
+    Eigen::Vector3f matchData(const Eigen::Vector3f& beginEstimateWorld, 
+                                                            const GridMap& grid_map, 
+                                                            const LaserPointContainer& dataContainer, 
+                                                            Eigen::Matrix3f& covMatrix, 
                                                             int maxIterations) {
+        // 第一帧时，dataContainer为空 因此不会进行匹配                                                      
         if (dataContainer.getSize() != 0) {
             // beginEstimateWorld 为相对于世界坐标系的位姿 ，这里将世界坐标系的位姿转换为相对于当前OccMap的
             Eigen::Vector3f beginEstimateMap(grid_map.getMapCoordsPose(beginEstimateWorld));
@@ -102,9 +103,9 @@ protected:
      * @param dataPoints    激光数据
      * @return  提示是否有解　－－－　貌似没用上
     */
-    bool estimateTransformationGN(Eigen::Vector3f &estimate,
-                                                                        const GridMap &grid_map,
-                                                                        const LaserPointContainer &dataPoints) {
+    bool estimateTransformationGN(Eigen::Vector3f& estimate,
+                                                                        const GridMap& grid_map,
+                                                                        const LaserPointContainer& dataPoints) {
         /** 核心函数，计算H矩阵和dTr向量(ｂ列向量)---- occGridMapUtil.h 中 **/
         getCompleteHessianDerivs(estimate, grid_map, dataPoints, H, dTr);
         //std::cout << "\nH\n" << H  << "\n";
@@ -140,11 +141,11 @@ protected:
      * @param H   需要计算的 H矩阵
      * @param dTr  需要计算的 g列向量
      */
-    void getCompleteHessianDerivs(const Eigen::Vector3f &pose,
-                                                                        const GridMap &grid_map,
-                                                                        const LaserPointContainer &dataPoints,
-                                                                        Eigen::Matrix3f &H,
-                                                                        Eigen::Vector3f &dTr) {
+    void getCompleteHessianDerivs(const Eigen::Vector3f& pose,
+                                                                        const GridMap& grid_map,
+                                                                        const LaserPointContainer& dataPoints,
+                                                                        Eigen::Matrix3f& H,
+                                                                        Eigen::Vector3f& dTr) {
         int size = dataPoints.getSize();
         // 获取变换矩阵
         Eigen::Isometry2f transform = 
@@ -192,8 +193,8 @@ protected:
      * @param coords  激光点地图坐标
      * @return ret(0) 是网格值 ， ret(1) 是栅格值在x方向的导数 ， ret(2)是栅格值在y方向的导数
      */
-    Eigen::Vector3f interpMapValueWithDerivatives(const GridMap &grid_map, 
-                                                                                                        const Eigen::Vector2f &coords) {
+    Eigen::Vector3f interpMapValueWithDerivatives(const GridMap& grid_map, 
+                                                                                                        const Eigen::Vector2f& coords) {
         // 检查coords坐标是否是在地图坐标范围内
         if (grid_map.pointOutOfMapBounds(coords)) {
             return Eigen::Vector3f(0.0f, 0.0f, 0.0f);

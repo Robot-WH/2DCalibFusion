@@ -63,6 +63,7 @@ public:
     void scanCallback(const sensor_msgs::LaserScan &scan);
     void wheelOdomCallback(const nav_msgs::Odometry &odom);
     void imuCallback(const sensor_msgs::Imu &imu);
+    void FusionOdomResultCallback(const TimedPose2d& data);
     void lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 1>& ext);
     void wheelOdomDeadReckoningCallback(const Pose2d& pose);
     void undistortedPointcloudCallback(const hectorslam::LaserPointCloud::Ptr& data);

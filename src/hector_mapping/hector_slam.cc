@@ -58,10 +58,12 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
                                                                                                     &HectorMappingRos::lidarOdomExtransicCallback, 
                                                                                                     this, 
                                                                                                     5);
+    // 轮速解算的回调
     util::DataDispatcher::GetInstance().Subscribe("WheelDeadReckoning", 
                                                                                                     &HectorMappingRos::wheelOdomDeadReckoningCallback, 
                                                                                                     this, 
                                                                                                     5);
+    // 去除畸变的回调
     util::DataDispatcher::GetInstance().Subscribe("undistorted_pointcloud", 
                                                                                                     &HectorMappingRos::undistortedPointcloudCallback, 
                                                                                                     this, 
@@ -81,7 +83,7 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
     std::string mapTopic_ = "map";
     for (int i = 0; i < mapLevels; ++i) {
         mapPubContainer.push_back(MapPublisherContainer());
-        estimator_->addMapMutex(i, new HectorMapMutex());
+        estimator_->AddMapMutex(i, new HectorMapMutex());
         std::string mapTopicStr(mapTopic_);
 
         if (i != 0) {
@@ -95,7 +97,7 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
         tmp.mapPublisher_ = node_handle_.advertise<nav_msgs::OccupancyGrid>(mapTopicStr, 1, true);
         tmp.mapMetadataPublisher_ = node_handle_.advertise<nav_msgs::MapMetaData>(mapMetaTopicStr, 1, true);
 
-        setMapInfo(tmp.map_, estimator_->getGridMap(i)); // 设置地图服务
+        setMapInfo(tmp.map_, estimator_->GetGridMap(i)); // 设置地图服务
 
         if (i == 0) {
             mapPubContainer[i].mapMetadataPublisher_.publish(mapPubContainer[i].map_.map.info);
@@ -180,6 +182,7 @@ void HectorMappingRos::wheelOdomCallback(const nav_msgs::Odometry& odom_msg) {
     }
     WheelOdom odom;
     double curr_time = odom_msg.header.stamp.toSec();
+
     if (curr_time <= last_time) {
         // std::cout << common::RED << "------------------------轮速计时间戳混乱!--------------------------" << std::endl; 
         return;  
@@ -265,7 +268,7 @@ void HectorMappingRos::scanCallback(const sensor_msgs::LaserScan &scan) {
         << "激光角度分辨率: " << laser_info_.angle_increment_ * 180 / 3.1415926<< std::endl 
         << "激光周期时间: " << laser_info_.laser_period_<< std::endl;
     } 
-    start_time_ = std::chrono::steady_clock::now();
+    // start_time_ = std::chrono::steady_clock::now();
     // 将 scan 转换成 点云格式
     LaserPointCloud::ptr laser_ptr(new LaserPointCloud());
     // 将雷达数据的点云格式 更改成 hector 内部的数据格式
@@ -274,21 +277,21 @@ void HectorMappingRos::scanCallback(const sensor_msgs::LaserScan &scan) {
         estimator_->InputLaser(laser_ptr);
     }
         
-    end_time_ = std::chrono::steady_clock::now();
-    time_used_ = std::chrono::duration_cast<std::chrono::duration<double>>(end_time_ - start_time_);
-    std::cout << "数据转换与扫描匹配用时: " << time_used_.count() << " 秒。" << std::endl;
+    // end_time_ = std::chrono::steady_clock::now();
+    // time_used_ = std::chrono::duration_cast<std::chrono::duration<double>>(end_time_ - start_time_);
+    // std::cout << "数据转换与扫描匹配用时: " << time_used_.count() << " 秒。" << std::endl;
 
-    if (p_timing_output_) {
-        ros::WallDuration duration = ros::WallTime::now() - startTime;
-        ROS_INFO("HectorSLAM Iter took: %f milliseconds", duration.toSec() * 1000.0f);
-    }
+    // if (p_timing_output_) {
+    //     ros::WallDuration duration = ros::WallTime::now() - startTime;
+    //     ROS_INFO("HectorSLAM Iter took: %f milliseconds", duration.toSec() * 1000.0f);
+    // }
 
-    const TimedPose2d& last_pose = estimator_->getLastFusionPose();
+    const TimedPose2d& last_pose = estimator_->GetLastFusionPose();
     if (last_pose.time_stamp_ < 0) return;  
     // std::cout << "last_pose: " << last_pose.transpose() <<std::endl;
 
     geometry_msgs::PoseWithCovarianceStamped pose_info = 
-        RosUtils::GetPoseWithCovarianceStamped(last_pose.pose_.ReadVec(), estimator_->getLastScanMatchCovariance(), 
+        RosUtils::GetPoseWithCovarianceStamped(last_pose.pose_.ReadVec(), estimator_->GetLastScanMatchCovariance(), 
                                                                                                 ros::Time(last_pose.time_stamp_), odomFrame_name_); 
     // 发布tf
     tf::Transform primeLaser_to_odom_tf = RosUtils::GetTFTransform(ext_prime_laser_to_odom_); 
@@ -319,6 +322,13 @@ void HectorMappingRos::scanCallback(const sensor_msgs::LaserScan &scan) {
     end_time_ = std::chrono::steady_clock::now();
     time_used_ = std::chrono::duration_cast<std::chrono::duration<double>>(end_time_ - start_time_);
     std::cout << "执行一次回调用时: " << time_used_.count() << " 秒。" << std::endl;
+}
+
+/**
+ * @brief: 接收融合算法计算的结果 
+ */
+void HectorMappingRos::FusionOdomResultCallback(const TimedPose2d& data) {
+
 }
 
 void HectorMappingRos::lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 1>& ext) {
@@ -408,7 +418,7 @@ void HectorMappingRos::publishMapLoop(double map_pub_period) {
         ros::Time mapTime(ros::Time::now());
         //publishMap(mapPubContainer[2],estimator_->getGridMap(2), mapTime);
         //publishMap(mapPubContainer[1],estimator_->getGridMap(1), mapTime);
-        publishMap(mapPubContainer[0], estimator_->getGridMap(0), mapTime, estimator_->getMapMutex(0));
+        publishMap(mapPubContainer[0], estimator_->GetGridMap(0), mapTime, estimator_->GetMapMutex(0));
         r.sleep();
     }
 }

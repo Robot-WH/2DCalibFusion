@@ -3,22 +3,14 @@
 #include<cassert>
 #include "../../../Sensor/LaserPointContainer.h"
 #include "../../../Estimator/motionModel.hpp" 
+#include "../../../util/utility.hpp" 
+
 namespace hectorslam {
 
 void LaserUndistorted(LaserPointCloud::Ptr& laser, const Path& motion_info) {
-    // laser前后应该是与path完全对齐的
     if (motion_info.size() == 0) {
         return;  
     }
-    if (laser->end_time_ != motion_info.back().time_stamp_) {
-        std::cerr << "laser->end_time_ != motion_info.back().time_stamp_" << std::endl;
-        throw std::bad_exception();  
-    }
-    if (laser->start_time_ != motion_info.front().time_stamp_) {
-        std::cerr << "laser->end_time_ != motion_info.back().time_stamp_" << std::endl;
-        throw std::bad_exception();  
-    }
-
     int16_t ptr = laser->pointcloud_.size() - 1;    // 从最后一个点往前进行处理 
     Pose2d begin_pose = motion_info.back().pose_;     // T_begin<-end
     // 相邻的两个motion数据  靠近motion_info.back() 为 front ,靠近 motion_info.front() 的为 back 

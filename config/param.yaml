@@ -12,5 +12,10 @@ grid_map_pyramid:
       x: 2048
       y: 2048
   map_depth: 3 # 金子塔层数
-    
+
+kalman_filter:   
+  type: "ekf"     # ekf / eskf
+  coordinate: "globalcentric"     # 参考坐标系  globalcentric / robocentric
+  enable: false
+
           
