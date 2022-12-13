@@ -53,6 +53,11 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
     tf_laserOdom_to_odom_ = new tf::TransformBroadcaster();  
     // 外参初始化
     ext_prime_laser_to_odom_.setZero(); 
+    //订阅融合的里程计结果 
+    util::DataDispatcher::GetInstance().Subscribe("fusionOdom", 
+                                                                                                    &HectorMappingRos::FusionOdomResultCallback, 
+                                                                                                    this, 
+                                                                                                    5);
     // 订阅激光和odom的外参回调
     util::DataDispatcher::GetInstance().Subscribe("lidarOdomExt", 
                                                                                                     &HectorMappingRos::lidarOdomExtransicCallback, 
@@ -285,26 +290,29 @@ void HectorMappingRos::scanCallback(const sensor_msgs::LaserScan &scan) {
     //     ros::WallDuration duration = ros::WallTime::now() - startTime;
     //     ROS_INFO("HectorSLAM Iter took: %f milliseconds", duration.toSec() * 1000.0f);
     // }
+}
 
-    const TimedPose2d& last_pose = estimator_->GetLastFusionPose();
-    if (last_pose.time_stamp_ < 0) return;  
-    // std::cout << "last_pose: " << last_pose.transpose() <<std::endl;
+/**
+ * @brief: 接收融合算法计算的结果 
+ */
+void HectorMappingRos::FusionOdomResultCallback(const TimedPose2d& data) {
+    if (data.time_stamp_ < 0) return;  
 
     geometry_msgs::PoseWithCovarianceStamped pose_info = 
-        RosUtils::GetPoseWithCovarianceStamped(last_pose.pose_.ReadVec(), estimator_->GetLastScanMatchCovariance(), 
-                                                                                                ros::Time(last_pose.time_stamp_), odomFrame_name_); 
+        RosUtils::GetPoseWithCovarianceStamped(data.pose_.ReadVec(), estimator_->GetLastScanMatchCovariance(), 
+                                                                                                ros::Time(data.time_stamp_), odomFrame_name_); 
     // 发布tf
     tf::Transform primeLaser_to_odom_tf = RosUtils::GetTFTransform(ext_prime_laser_to_odom_); 
     tf_base_to_odom_->sendTransform(tf::StampedTransform(RosUtils::GetTFTransform(pose_info.pose.pose), 
-                                                ros::Time(last_pose.time_stamp_), 
+                                                ros::Time(data.time_stamp_), 
                                                 odomFrame_name_, 
                                                 baseFrame_name_));
     tf_laserOdom_to_odom_->sendTransform(tf::StampedTransform(primeLaser_to_odom_tf, 
-                                                ros::Time(last_pose.time_stamp_), 
+                                                ros::Time(data.time_stamp_), 
                                                 odomFrame_name_, 
                                                 laserOdomFrame_name_));                                            
     tf_laser_to_base_->sendTransform(tf::StampedTransform(primeLaser_to_odom_tf, 
-                                                ros::Time(last_pose.time_stamp_), 
+                                                ros::Time(data.time_stamp_), 
                                                 baseFrame_name_, 
                                                 primeLaserFrame_name_));
 
@@ -318,17 +326,6 @@ void HectorMappingRos::scanCallback(const sensor_msgs::LaserScan &scan) {
         tmp.child_frame_id = baseFrame_name_;
         odometryPublisher_.publish(tmp);
     }
-    
-    end_time_ = std::chrono::steady_clock::now();
-    time_used_ = std::chrono::duration_cast<std::chrono::duration<double>>(end_time_ - start_time_);
-    std::cout << "执行一次回调用时: " << time_used_.count() << " 秒。" << std::endl;
-}
-
-/**
- * @brief: 接收融合算法计算的结果 
- */
-void HectorMappingRos::FusionOdomResultCallback(const TimedPose2d& data) {
-
 }
 
 void HectorMappingRos::lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 1>& ext) {

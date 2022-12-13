@@ -240,7 +240,8 @@ protected:
                     last_fusionOdom_pose_.pose_ = new_estimate_odom_pose;
                     last_fusionOdom_pose_.time_stamp_ = curr_laser_ptr->end_time_; 
                     // std::cout << "odom correct : " << new_estimate_odom_pose.Vec().transpose() << std::endl;
-
+                    // 发布融合里程计的结果
+                    util::DataDispatcher::GetInstance().Publish("fusionOdom", last_fusionOdom_pose_); 
                     /** 2.地图更新(last_map_updata_pose_初始化为一个很大的值，因此第一帧点云就会更新地图) **/
                     if (util::poseDifferenceLargerThan(new_estimate_laserOdom_pose.Vec(), last_map_updata_pose_.Vec(), 
                             paramMinDistanceDiffForMapUpdate, paramMinAngleDiffForMapUpdate)) { 
