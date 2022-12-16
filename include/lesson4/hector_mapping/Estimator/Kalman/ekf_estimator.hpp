@@ -4,18 +4,24 @@
 namespace hectorslam {
 /**
  * @brief: 常规EKF估计框架
+ * @details 状态 位置 + 旋转 + 速度
  */
 class EstimatorEKF {
 public: 
+    EstimatorEKF() {
+        state_.X_ = Eigen::Matrix<float, 5, 1>::Zero(); 
+        state_.cov_ = Eigen::Matrix<float, 5, 5>::Zero();  
+    }
     /**
      * @brief: 初始化  即设置初始状态  
      */    
     void Init(const Pose2d& pose, const float& linear_velocity_measurement, 
             const float& angular_velocity_measurement, const double& time_stamp) {
-        state_.X_[0] = pose.GetX();
-        state_.X_[1] = pose.GetY();
-        state_.X_[2] = pose.GetYaw();
-        state_.cov_.setZero();  
+        state_.X_[0] = pose.GetX();    // px
+        state_.X_[1] = pose.GetY();    // py
+        state_.X_[2] = pose.GetYaw();   // theta
+        state_.X_[3] = linear_velocity_measurement;  // vx
+        state_.X_[4] = angular_velocity_measurement;  // omega
         last_time_ = time_stamp;
         last_linear_velocity_ = linear_velocity_measurement;
         last_angular_velocity_ = angular_velocity_measurement; 
@@ -51,20 +57,25 @@ public:
         state_.X_[0] = curr_pose.GetX(); 
         state_.X_[1] = curr_pose.GetY();
         state_.X_[2] = curr_pose.GetYaw();
+        state_.X_[3] = linear_velocity_measurement; 
+        state_.X_[4] = angular_velocity_measurement; 
         // 更新预测状态协方差 
         double dt = time_stamp - last_time_;
         double dt_2 = dt * dt;  
         float mid_linear_velocity = (linear_velocity_measurement + last_linear_velocity_) / 2; 
         float mid_anguler_velocity = (angular_velocity_measurement + last_angular_velocity_) / 2; 
         float curr_angular = last_pose_.GetYaw() + mid_anguler_velocity * dt / 2;
-        Eigen::Matrix3f F;
-        F << 1, 0, -mid_linear_velocity * dt * sin(curr_angular),
-                    0, 1, mid_linear_velocity * dt * cos(curr_angular),
-                    0, 0, 1;
-        Eigen::Matrix<float, 3, 2> B;
+        Eigen::Matrix<float, 5, 5> F;
+        F.setZero();  
+        F(0, 0) = 1; F(1, 1) = 1; F(2, 2) = 1;
+        F(0, 2) = -mid_linear_velocity * dt * sin(curr_angular);
+        F(1, 2) = mid_linear_velocity * dt * cos(curr_angular);       
+        Eigen::Matrix<float, 5, 2> B;
         B << dt * cos(curr_angular),  -mid_linear_velocity * dt_2 * sin(curr_angular) / 2,
                     dt * sin(curr_angular), mid_linear_velocity * dt_2 * cos(curr_angular) / 2,
-                    0, dt; 
+                    0, dt,
+                    1, 0,
+                    0, 1; 
         // 测量协方差
         Eigen::Matrix2f Q;
         Q << noise_linear_velocity, 0,
@@ -87,40 +98,47 @@ public:
      * @param time_stamp 观测时间戳  
      */    
     void Correct(const Pose2d& obs, const Eigen::MatrixXf& obs_cov, const double& time_stamp) {
-        std::cout << "校正，time_stamp: " << std::setprecision(15) << time_stamp << ", last_time_: "
-            << last_time_ << std::endl;
+        // std::cout << "校正，time_stamp: " << std::setprecision(15) << time_stamp << ", last_time_: "
+        //     << last_time_ << std::endl;
         // 若观测与上次预测的时间戳相差不到1ms，认为观测有效
         if (std::fabs(time_stamp - last_time_) >= 1e-3) {
             throw "EKF correct time error!";
         }
 
         last_time_ = time_stamp;  
-        std::cout << "obs: " << obs.ReadVec().transpose() << std::endl;
-        Eigen::Matrix3f H; // 观测jacobian
-        H.setIdentity(); 
+        // std::cout << "obs: " << obs.ReadVec().transpose() << std::endl;
+        Eigen::Matrix<float, 3, 5> H; // 观测jacobian
+        H.setZero(); 
+        H(0, 0) = 1; H(1, 1) = 1; H(2, 2) = 1;
         Eigen::Matrix3f C;  // 观测噪声jacobian
         C.setIdentity(); 
         Eigen::MatrixXf K = state_.cov_ * H.transpose() * 
                                                 (H * state_.cov_ * H.transpose() + C * obs_cov * C.transpose()).inverse();
         Eigen::MatrixXf diff_obs = obs.ReadVec() - H * state_.X_;
-        
+        // std::cout << "K: " << std::endl << K << std::endl;
         if (diff_obs(2, 0) > M_PI) {
             diff_obs(2, 0) = diff_obs(2, 0) - 2 * M_PI; 
         } else if (diff_obs(2, 0) < -M_PI) {
             diff_obs(2, 0) =  2 * M_PI + diff_obs(2, 0); 
         }
-
-        state_.X_ = state_.X_ + K * diff_obs;   // 后验均值
-        Eigen::MatrixXf I_KH = Eigen::Matrix3f::Identity() - K * H;
+        // 修正量
+        Eigen::VectorXf amendment = K * diff_obs;
+        std::cout << "amendment: "<< amendment.transpose() << std::endl;
+        state_.X_ += amendment;   // 后验均值
+        Eigen::MatrixXf I_KH = Eigen::Matrix<float, 5, 5>::Identity() - K * H;
         state_.cov_ = I_KH * state_.cov_ * I_KH.transpose() + 
                                     K * C * obs_cov * C.transpose() * K.transpose();    // 后验方差
         last_posteriori_pose_.SetX(state_.X_[0]);
         last_posteriori_pose_.SetY(state_.X_[1]);
         last_posteriori_pose_.SetRotation(state_.X_[2]);
         last_pose_ = last_posteriori_pose_;
-        std::cout << "校正完成, " << "pose: " << last_posteriori_pose_.ReadVec().transpose()  << std::endl;
+        std::cout << "校正完成, " << "状态: " << state_.X_.transpose() << std::endl;
         // std::cout << "cov: " << std::endl;
         // std::cout << state_.cov_ << std::endl;
+    }
+
+    const State& ReadState() const {
+        return state_; 
     }
 
     /**

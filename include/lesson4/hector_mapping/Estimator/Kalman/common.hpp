@@ -8,9 +8,10 @@
 namespace hectorslam {
 // 状态 pos + 姿态 
 struct State {
-    Eigen::Vector3f X_;    // 位置 + 旋转
-    Eigen::Matrix3f cov_;  
+    Eigen::VectorXf X_;    // 位置 + 旋转 + 速度
+    Eigen::MatrixXf cov_;  
 };
+
 struct PoseObs {
     Pose2d obs_;
 

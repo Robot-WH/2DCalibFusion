@@ -11,7 +11,7 @@ void LaserUndistorted(LaserPointCloud::Ptr& laser, const Path& motion_info) {
     if (motion_info.size() == 0) {
         return;  
     }
-    int16_t ptr = laser->pointcloud_.size() - 1;    // 从最后一个点往前进行处理 
+
     Pose2d begin_pose = motion_info.back().pose_;     // T_begin<-end
     // 相邻的两个motion数据  靠近motion_info.back() 为 front ,靠近 motion_info.front() 的为 back 
     Pose2d front_relate_begin_pose; // 相对与 激光最后一个点坐标系的pose 初始化为0 
@@ -20,6 +20,7 @@ void LaserUndistorted(LaserPointCloud::Ptr& laser, const Path& motion_info) {
     double part_front_time =  motion_info.back().time_stamp_ - motion_info.front().time_stamp_;
     double part_back_time = 0; 
     Pose2d point_pose; // 每个激光点对应的雷达Pose 
+    int16_t ptr = laser->pointcloud_.size() - 1;    // 从最后一个点往前进行处理 
 
     for (uint16_t i = motion_info.size() - 1; i >= 1; --i) {
         back_relate_begin_pose = begin_pose.inv() * motion_info[i - 1].pose_;  //T_end<-curr = T_end<-begin * T_begin<-curr

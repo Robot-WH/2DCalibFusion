@@ -57,12 +57,23 @@ class DataContainerImpl : public DataContainerBase {
         }
 
         /**
+         * @brief: 触发回调的接口
+         * @param data 万能引用  
+         */        
+        template<typename _T>
+        void Call(_T&& data) {
+            Function<void(remove_reference_t<_DataT>&)>* p_callback =  
+                dynamic_cast<Function<void(remove_reference_t<_DataT>&)>*>(p_callback_wrapper_);
+            (*p_callback)(data);   // 由于 p_callback 绑定的参数为左值引用，所以不需要对data进行完美转发。输入为右值时，data也是个左值
+        }
+
+        /**
          * @brief: 执行回调函数
          * @return 执行回调是否成功
          */        
         virtual bool Callback() override {
             if (data_buffer_.empty()) return false;   
-            call(data_buffer_.front());   // 传入左值   
+            Call(data_buffer_.front());   // 传入左值   
             DeleteFrontData();  
             return true;  
         }
@@ -120,17 +131,6 @@ class DataContainerImpl : public DataContainerBase {
         }
 
     private:
-        /**
-         * @brief: 触发回调的接口
-         * @param data 万能引用  
-         */        
-        template<typename _T>
-        void call(_T&& data) {
-            Function<void(remove_reference_t<_DataT>&)>* p_callback =  
-                dynamic_cast<Function<void(remove_reference_t<_DataT>&)>*>(p_callback_wrapper_);
-            (*p_callback)(data);   // 由于 p_callback 绑定的参数为左值引用，所以不需要对data进行完美转发。输入为右值时，data也是个左值
-        }
-
         std::mutex data_m_;   // 加了mutex后变成了只移型别   (禁止了拷贝构造)
         std::deque<_DataT> data_buffer_;       // 容器的型别不支持 const/&，_DataT 必须是非引用和非const的  
         std::type_index type_info_;  // 数据类型信息 
@@ -149,9 +149,11 @@ class Subscriber {
          * @param callback 类内成员函数地址
          * @param class_addr 类对象地址
          * @param  cache_capacity 缓存容量  
+         * @param high_priority 是否为高优先级
          */        
         template<typename _DataT, typename _Ctype>
-        Subscriber(void (_Ctype::*callback)(_DataT), _Ctype* class_addr, int cache_capacity = 1) {
+        Subscriber(void (_Ctype::*callback)(_DataT), _Ctype* class_addr, int cache_capacity = 1,
+                bool high_priority = false) : high_priority_(high_priority) {
             // std::cout << "construct Subscriber" <<std::endl;
             // 去除类别的const和引用
             using pure_type = typename std::remove_const<remove_reference_t<_DataT>>::type; 
@@ -163,9 +165,11 @@ class Subscriber {
          * @brief: 构造函数
          * @param callback 普通成员函数地址
          * @param  cache_capacity 缓存容量  
+         * @param high_priority 是否为高优先级
          */      
         template<typename _DataT>
-        Subscriber(void (*callback)(_DataT), int cache_capacity = 1) {
+        Subscriber(void (*callback)(_DataT), int cache_capacity = 1,
+                bool high_priority = false) : high_priority_(high_priority) {
             using pure_type = typename std::remove_const<remove_reference_t<_DataT>>::type; 
             data_cache_ = new DataContainerImpl<pure_type>(cache_capacity, 
                 new Function<void(pure_type&)>(callback));
@@ -214,14 +218,21 @@ class Subscriber {
                 std::cerr<<"DataDispatcher addData() Type ERROR !!!"<<std::endl;
                 throw std::bad_cast();  
             }
+
             using pure_type = typename std::remove_const<remove_reference_t<_DataT>>::type; 
             DataContainerImpl<pure_type>* data_container_ptr =  
                 dynamic_cast<DataContainerImpl<pure_type>*>(data_cache_);
-            data_container_ptr->AddData(std::forward<_DataT>(data));     // 线程安全的
+
+            if (high_priority_) {
+                data_container_ptr->Call(std::forward<_DataT>(data));  // 高优先级的直接调用 
+            } else {
+                data_container_ptr->AddData(std::forward<_DataT>(data));     // 线程安全的
+            }
         }
 
         friend class DataDispatcher; 
-        DataContainerBase* data_cache_;   // 数据缓存 
+        DataContainerBase* data_cache_ = nullptr;   // 数据缓存 
+        bool high_priority_ = false; 
 };
 
 /**
@@ -253,13 +264,16 @@ class DataDispatcher {
          * @param callback 注册的回调函数
          * @param class_addr 类对象地址
          * @param cache_capacity 缓存容量 
+         * @param high_priority true 高优先级的订阅者在数据发布时会直接调用回调
+         *                                                false 低优先级的订阅者在数据发布后由回调线程统一进行调度
          */        
         template<typename _DataT, typename _Ctype>
         Subscriber& Subscribe(std::string const& name, 
-                                                    void (_Ctype::*callback)(_DataT), 
-                                                    _Ctype* class_addr,
-                                                    int cache_capacity = 1) {
-            Subscriber* p_subscriber = new Subscriber(callback, class_addr, cache_capacity);
+                                                            void (_Ctype::*callback)(_DataT), 
+                                                            _Ctype* class_addr,
+                                                            int cache_capacity = 1,
+                                                            bool high_priority = false) {
+            Subscriber* p_subscriber = new Subscriber(callback, class_addr, cache_capacity, high_priority);
             substriber_container_m_.lock();
             active_data_container_m_.lock();  
             active_data_container_[name] = false;  
@@ -278,8 +292,9 @@ class DataDispatcher {
         template<typename _DataT, typename _Ctype>
         Subscriber& Subscribe(std::string const& name, 
                                                         void (*callback)(_DataT), 
-                                                        int cache_capacity = 1) {
-            Subscriber* p_subscriber = new Subscriber(callback, cache_capacity);
+                                                        int cache_capacity = 1,
+                                                        bool high_priority = false) {
+            Subscriber* p_subscriber = new Subscriber(callback, cache_capacity, high_priority);
             substriber_container_m_.lock();
             active_data_container_m_.lock();  
             active_data_container_[name] = false;  

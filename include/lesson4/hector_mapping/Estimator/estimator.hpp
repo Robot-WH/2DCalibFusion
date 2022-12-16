@@ -175,7 +175,17 @@ protected:
                     if (imu_selected.empty()) {
                         if (wheel_odom_selected.empty()) {
                             std::cout << common::YELLOW << "使用运动学模型预测 ..." << common::RESET << std::endl; 
+                            static State last_state = estimator_.ReadState(); 
                             // 没有轮速数据则用运动学模型预测
+                            const auto& state = estimator_.ReadState();   // 读取上一时刻的状态
+                            float filtered_linear_v = (last_state.X_[3] + state.X_[3]) / 2;
+                            float filtered_rot_v = (last_state.X_[4] + state.X_[4]) / 2;
+                            // 匀速运动学模型前向传播
+                            diff_model.Update(curr_laser_ptr->start_time_, filtered_linear_v, filtered_rot_v); 
+                            diff_model.Update(curr_laser_ptr->end_time_, filtered_linear_v, filtered_rot_v); 
+                            estimator_.Predict(diff_model.ReadLastPose().pose_, filtered_linear_v, filtered_rot_v, 
+                                0.25, 5, curr_laser_ptr->end_time_); 
+                            last_state = state; 
                         } else {
                             std::cout << common::GREEN << "使用轮速计预测 ..." << common::RESET << std::endl; 
                             // 使用轮速进行预测
@@ -186,20 +196,20 @@ protected:
                                 // EKF预测
                                 if (estimator_.is_init()) {
                                     estimator_.Predict(diff_model.ReadLastPose().pose_, curr_data.v_x_, 
-                                        curr_data.omega_yaw_, 0.0025, 0.03, curr_data.time_stamp_);    // 测量噪声 0.05m/s, 10度/s
+                                        curr_data.omega_yaw_, 0.0025, 1, curr_data.time_stamp_);    // 测量噪声 0.05m/s, 60度/s
                                 }
                             }
-
-                            predict_incre_pose = diff_model.ReadLastPose().pose_;
                         }
                     } else {
                         // 有IMU数据执行IMU的预测
                     }
+                    predict_incre_pose = diff_model.ReadLastPose().pose_;
                     // 去除laser的畸变
                     LaserUndistorted(curr_laser_ptr, diff_model.GetPath());
                     // 发布去畸变后的点云
                     util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", curr_laser_ptr); 
                     Pose2d predict_odom_pose = last_fusionOdom_pose_.pose_ * predict_incre_pose;   // To<-last * Tlast<-curr
+                    // Pose2d predict_odom_pose = last_fusionOdom_pose_.pose_; 
                     last_predictOdom_pose_.pose_ = last_predictOdom_pose_.pose_ * predict_incre_pose;
                     last_predictOdom_pose_.time_stamp_ = curr_laser_ptr->end_time_; 
                     // 发布轮速运动解算结果
@@ -229,11 +239,11 @@ protected:
                             Eigen::Matrix3f obs_cov = Eigen::Matrix3f::Zero();
                             obs_cov(0, 0) = 0.0001;    // x方向方差   0.01 * 0.01
                             obs_cov(1, 1) = 0.0001;    // y 方向方差 0.01 * 0.01
-                            obs_cov(2, 2) = 0.0003;    // yaw方差   1度
+                            obs_cov(2, 2) = 0.000003;    // yaw方差   0.1度
                             // 进行观测校正
                             estimator_.Correct(new_estimate_odom_pose, obs_cov, curr_laser_ptr->end_time_); 
                             new_estimate_odom_pose = estimator_.ReadPosterioriPose();
-                            // // 更新对应laser坐标
+                            // 更新对应laser坐标
                             poseOdomToPrimeLaserOdom(new_estimate_odom_pose, new_estimate_laserOdom_pose);
                         }
                     }
@@ -428,6 +438,8 @@ private:
     TimedPose2d last_fusionOdom_pose_;
     TimedPose2d last_predictOdom_pose_;
     Eigen::Matrix3f lastScanMatchCov;
+    float linear_v_ = 0;
+    float rot_v_ = 0; 
 
     float paramMinDistanceDiffForMapUpdate;
     float paramMinAngleDiffForMapUpdate;

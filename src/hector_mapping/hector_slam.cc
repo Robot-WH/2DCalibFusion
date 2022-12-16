@@ -57,7 +57,8 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
     util::DataDispatcher::GetInstance().Subscribe("fusionOdom", 
                                                                                                     &HectorMappingRos::FusionOdomResultCallback, 
                                                                                                     this, 
-                                                                                                    5);
+                                                                                                    5,
+                                                                                                    true);  // 高优先级
     // 订阅激光和odom的外参回调
     util::DataDispatcher::GetInstance().Subscribe("lidarOdomExt", 
                                                                                                     &HectorMappingRos::lidarOdomExtransicCallback, 
@@ -72,7 +73,8 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
     util::DataDispatcher::GetInstance().Subscribe("undistorted_pointcloud", 
                                                                                                     &HectorMappingRos::undistortedPointcloudCallback, 
                                                                                                     this, 
-                                                                                                    5);
+                                                                                                    5,
+                                                                                                    true); // 高优先级  
     std::string config_path = RosUtils::RosReadParam<std::string>(node_handle_, "ConfigPath");
 
     estimator_ = new FrontEndEstimator(config_path);
@@ -317,7 +319,6 @@ void HectorMappingRos::FusionOdomResultCallback(const TimedPose2d& data) {
                                                 ros::Time(data.time_stamp_), 
                                                 baseFrame_name_, 
                                                 primeLaserFrame_name_));
-
     // 发布 odom topic
     if (p_pub_odometry_) {
         nav_msgs::Odometry tmp;
@@ -363,6 +364,7 @@ void HectorMappingRos::undistortedPointcloudCallback(const LaserPointCloud::Ptr&
         pointcloud_msg.points.push_back(point);
     }
     pointcloud_msg.header.stamp = ros::Time(data->end_time_); 
+    // pointcloud_msg.header.stamp = ros::Time::now(); 
     pointcloud_msg.header.frame_id = primeLaserFrame_name_;
     undistorted_pointcloud_publisher_.publish(pointcloud_msg);
 }
@@ -466,16 +468,7 @@ void HectorMappingRos::publishMap(MapPublisherContainer &mapPublisher,
 
 int main(int argc, char **argv) {
     ros::init(argc, argv, "lesson4_hector_slam");
-
     HectorMappingRos hector_slam;
-
-    // util::Subscriber sub(&imuCallback); 
-    // sensor_msgs::Imu imu;
-    // sub.Call(imu); 
-    // auto func2 = std::bind(&HectorMappingRos::imuCallback, &hector_slam);
-    // auto  func2 = std::bind(&imuCallback, 1);
-
     ros::spin();
-
     return (0);
 }
