@@ -16,6 +16,6 @@ grid_map_pyramid:
 kalman_filter:   
   type: "ekf"     # ekf / eskf
   coordinate: "globalcentric"     # 参考坐标系  globalcentric / robocentric
-  enable: false
+  enable: true
 
           

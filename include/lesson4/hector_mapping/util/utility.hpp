@@ -84,9 +84,9 @@ Pose2d LinearInterpolate<Pose2d>(const Pose2d& front_value, const Pose2d& back_v
                                                                           double const& time) {
     float front_coeff = (back_time - time) / (back_time - front_time);
     float back_coeff = (time - front_time) / (back_time - front_time);
-    double x = front_coeff * front_value.GetX() + back_coeff * back_value.GetX();  
-    double y = front_coeff * front_value.GetY() + back_coeff * back_value.GetY();  
-    Eigen::Quaternionf orientation = front_value.GetOrientation().slerp(back_coeff, back_value.GetOrientation());
+    double x = front_coeff * front_value.x() + back_coeff * back_value.x();  
+    double y = front_coeff * front_value.y() + back_coeff * back_value.y();  
+    Eigen::Quaternionf orientation = front_value.orientation().slerp(back_coeff, back_value.orientation());
     return Pose2d(x, y, orientation);  
 } 
 
@@ -104,6 +104,22 @@ WheelOdom LinearInterpolate<WheelOdom>(const WheelOdom& front_value, const Wheel
     interpolate_data.v_x_ = front_coeff * front_value.v_x_ + back_coeff * back_value.v_x_;  
     interpolate_data.v_y_ = front_coeff * front_value.v_y_ + back_coeff * back_value.v_y_;  
     interpolate_data.omega_yaw_ = front_coeff * front_value.omega_yaw_ + back_coeff * back_value.omega_yaw_; 
+    return interpolate_data;  
+} 
+
+/**
+ * @brief: 线性插值的模板函数
+ * @details: IMU数据的特化  
+ */    
+template<>
+ImuData LinearInterpolate<ImuData>(const ImuData& front_value, const ImuData& back_value, 
+                                                                          double const& front_time, double const& back_time, 
+                                                                          double const& time) {
+    float front_coeff = (back_time - time) / (back_time - front_time);
+    float back_coeff = (time - front_time) / (back_time - front_time);
+    ImuData interpolate_data; 
+    interpolate_data.acc_ = front_coeff * front_value.acc_ + back_coeff * back_value.acc_;  
+    interpolate_data.angular_v_ = front_coeff * front_value.angular_v_ + back_coeff * back_value.angular_v_;  
     return interpolate_data;  
 } 
 

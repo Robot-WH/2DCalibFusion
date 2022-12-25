@@ -39,6 +39,8 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
         p_scan_subscriber_queue_size_, &HectorMappingRos::scanCallback, this); // 雷达数据处理
     wheel_odom_subscriber_ = node_handle_.subscribe(wheelOdomTopic_name_, 
         100, &HectorMappingRos::wheelOdomCallback, this);
+    imu_subscriber_ = node_handle_.subscribe(imuTopic_name_, 
+        100, &HectorMappingRos::imuCallback, this);
 
     if (p_pub_odometry_) {
         odometryPublisher_ = node_handle_.advertise<nav_msgs::Odometry>("odom_hector", 50);
@@ -138,6 +140,7 @@ void HectorMappingRos::InitParams() {
 
     private_node_.param("scan_topic", primeLaserTopic_name_, std::string("laser_scan"));
     private_node_.param("wheel_topic", wheelOdomTopic_name_, std::string("wheel_odom"));
+    private_node_.param("imu_topic", imuTopic_name_, std::string("imu"));
     private_node_.param("prime_laser_frame", primeLaserFrame_name_, std::string("primeLaser_link"));
     std::cout << "prime_laser_frame: " << primeLaserFrame_name_ << std::endl;
     private_node_.param("laser_odom_frame", laserOdomFrame_name_, std::string("laserOdom"));
@@ -179,6 +182,7 @@ void HectorMappingRos::InitParams() {
     private_node_.param("laser_z_max_value", tmp, 1.0);
     p_laser_z_max_value_ = static_cast<float>(tmp);
 }
+
 // 这个回调处理只输出位姿x，y，theta的里程计信息，这里会将odom位姿信息转化为速度和角速度
 void HectorMappingRos::wheelOdomCallback(const nav_msgs::Odometry& odom_msg) {
     static double last_time = -1;
@@ -209,7 +213,7 @@ void HectorMappingRos::wheelOdomCallback(const nav_msgs::Odometry& odom_msg) {
         odom.v_x_ = std::sqrt(std::pow((odom_msg.pose.pose.position.x - last_x) / dt, 2) + 
                                     std::pow((odom_msg.pose.pose.position.y - last_y) / dt, 2));
         odom.v_y_ = 0;
-        float delta_angle = odom.pose_.GetYaw() - last_yaw; 
+        float delta_angle = odom.pose_.yaw() - last_yaw; 
         if (delta_angle > M_PI) {
             delta_angle = delta_angle - 2 * M_PI; 
         }
@@ -224,12 +228,48 @@ void HectorMappingRos::wheelOdomCallback(const nav_msgs::Odometry& odom_msg) {
     }
     last_x = odom_msg.pose.pose.position.x;
     last_y = odom_msg.pose.pose.position.y;
-    last_yaw = odom.pose_.GetYaw(); 
+    last_yaw = odom.pose_.yaw(); 
     last_time = curr_time;  
 }
 
-void HectorMappingRos::imuCallback(const sensor_msgs::Imu &imu) {
-    std::cout << "get &HectorMappingRos::imuCallback:" << std::endl;
+void HectorMappingRos::imuCallback(const sensor_msgs::Imu& imu_msg) {
+    static int i = 0; 
+    static double last_time = -1;
+    // 舍弃第一个数据  因为第一个数据有时会错乱  
+    if (last_time < 0) {
+        last_time = 0;
+        return;  
+    }
+
+    double curr_time = imu_msg.header.stamp.toSec();
+
+    if (curr_time <= last_time) {
+        // std::cout << common::RED << "------------------------IMU时间戳混乱!--------------------------" << std::endl; 
+        return;  
+    }
+
+    i++;
+    //std::cout << common::RED << "imu index: " << i << common::RESET << std::endl;
+
+    ImuData imu; 
+    imu.time_stamp_ = curr_time;
+    imu.acc_ = Eigen::Vector3d{imu_msg.linear_acceleration.x, 
+                                                            imu_msg.linear_acceleration.y,
+                                                            imu_msg.linear_acceleration.z};
+    imu.angular_v_ = Eigen::Vector3d{imu_msg.angular_velocity.x,
+                                                                            imu_msg.angular_velocity.y,
+                                                                            imu_msg.angular_velocity.z};      
+    if (i > 2000 && i < 3000) {
+        imu.angular_v_[2] -= 0.1; 
+    } else if (i > 3000 && i < 4000) {
+        imu.angular_v_[2] -= 0.2; 
+    } else if (i > 4000 && i < 5000) {
+        imu.angular_v_[2] -= 0.3; 
+    } else if (i > 5000) {
+        imu.angular_v_[2] -= 0.4; 
+    }                   
+
+    estimator_->InputImu(imu);
 }
 
 /**
@@ -303,7 +343,7 @@ void HectorMappingRos::FusionOdomResultCallback(const TimedPose2d& data) {
     if (data.time_stamp_ < 0) return;  
 
     geometry_msgs::PoseWithCovarianceStamped pose_info = 
-        RosUtils::GetPoseWithCovarianceStamped(data.pose_.ReadVec(), estimator_->GetLastScanMatchCovariance(), 
+        RosUtils::GetPoseWithCovarianceStamped(data.pose_.vec(), estimator_->GetLastScanMatchCovariance(), 
                                                                                                 ros::Time(data.time_stamp_), odomFrame_name_); 
     // 发布tf
     tf::Transform primeLaser_to_odom_tf = RosUtils::GetTFTransform(ext_prime_laser_to_odom_); 
@@ -338,7 +378,7 @@ void HectorMappingRos::lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 
 // 原始wheel 航迹推算，调试用
 void HectorMappingRos::wheelOdomDeadReckoningCallback(const TimedPose2d& pose) {
     geometry_msgs::PoseWithCovarianceStamped pose_info = 
-        RosUtils::GetPoseWithCovarianceStamped(Eigen::Vector3f{pose.pose_.GetX(), pose.pose_.GetY(), pose.pose_.GetYaw()}, 
+        RosUtils::GetPoseWithCovarianceStamped(Eigen::Vector3f{pose.pose_.x(), pose.pose_.y(), pose.pose_.yaw()}, 
                                                                                                 Eigen::Matrix3f::Zero(), 
                                                                                                 ros::Time(pose.time_stamp_), odomFrame_name_); 
     nav_msgs::Odometry tmp;

@@ -49,5 +49,4 @@ void LaserUndistorted(LaserPointCloud::Ptr& laser, const Path& motion_info) {
         part_front_time = part_back_time; 
     }
 }
-
 }

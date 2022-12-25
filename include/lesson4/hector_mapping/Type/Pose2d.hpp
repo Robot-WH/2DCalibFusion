@@ -68,30 +68,30 @@ class Pose2d {
             Eigen::AngleAxisf rollAngle(0,Eigen::Vector3f::UnitX());
             Eigen::AngleAxisf pitchAngle(0,Eigen::Vector3f::UnitY());
             Eigen::AngleAxisf yawAngle(vec_[2],Eigen::Vector3f::UnitZ());
-            orientation_ = rollAngle * pitchAngle * yawAngle;
+            orientation_ = rollAngle * pitchAngle * yawAngle;   // z->y->x
         }
 
-        float GetX() const {
+        void SetVec(const Eigen::Vector3f& vec) {
+            vec_ = vec; 
+        }
+
+        const float& x() const {
             return vec_[0];
         }
 
-        float GetY() const {
+        const float& y() const {
             return vec_[1];
         }
 
-        float GetYaw() const {
+        const float& yaw() const {
             return vec_[2];
         }
 
-        Eigen::Quaternionf GetOrientation() const {
+        const Eigen::Quaternionf& orientation() const {
             return orientation_; 
         }  
 
-        const Eigen::Vector3f& ReadVec() const {
-            return vec_; 
-        }
-
-        Eigen::Vector3f& Vec() {
+        const Eigen::Vector3f& vec() const {
             return vec_; 
         }
 

@@ -50,12 +50,12 @@ public:
             double dt = time_stamp - last_pose_.time_stamp_;
             float mid_linear_velocity = (linear_velocity + last_linear_velocity_) / 2; 
             float mid_angular_velocity = (angular_velocity + last_angular_velocity_) / 2;
-            float x = last_pose_.pose_.GetX() + mid_linear_velocity * dt 
-                * cos(last_pose_.pose_.GetYaw() + mid_angular_velocity * dt / 2);
-            float y = last_pose_.pose_.GetY() + mid_linear_velocity * dt 
-                * sin(last_pose_.pose_.GetYaw() + mid_angular_velocity * dt / 2);
+            float x = last_pose_.pose_.x() + mid_linear_velocity * dt 
+                * cos(last_pose_.pose_.yaw() + mid_angular_velocity * dt / 2);
+            float y = last_pose_.pose_.y() + mid_linear_velocity * dt 
+                * sin(last_pose_.pose_.yaw() + mid_angular_velocity * dt / 2);
             last_pose_.pose_.SetTransform(x, y);
-            last_pose_.pose_.SetRotation(last_pose_.pose_.GetYaw() + mid_angular_velocity * dt);
+            last_pose_.pose_.SetRotation(last_pose_.pose_.yaw() + mid_angular_velocity * dt);
         }
         last_pose_.time_stamp_ = time_stamp;
         last_linear_velocity_ = linear_velocity;
