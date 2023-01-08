@@ -1,3 +1,4 @@
+
 //=================================================================================================
 // Copyright (c) 2011, Stefan Kohlbrecher, TU Darmstadt
 // All rights reserved.
@@ -33,7 +34,9 @@
 #include "GridMapLogOdds.h"
 // #include "GridMapReflectanceCount.h"
 // #include "GridMapSimpleCount.h"
-
+/**
+ * @todo 烂代码   准备删除 
+ */
 namespace hectorslam {
 
 typedef OccGridMapBase<LogOddsCell, GridMapLogOddsFunctions> GridMap;

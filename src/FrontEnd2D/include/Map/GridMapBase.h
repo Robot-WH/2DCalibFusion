@@ -26,12 +26,10 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //=================================================================================================
 
-#ifndef _LESSON4_GRIDMAPBASE_h_
-#define _LESSON4_GRIDMAPBASE_h_
+#pragma once 
 
 #include <Eigen/Geometry>
 #include <Eigen/LU>
-#include "MapDimensionProperties.h"
 
 namespace hectorslam {
 
@@ -39,366 +37,289 @@ namespace hectorslam {
  * GridMapBase provides basic grid map functionality (creates grid , provides transformation from/to world coordinates).
  * It serves as the base class for different map representations that may extend it's functionality.
  */
-template <typename ConcreteCellType>
+template <typename _CellType>
 class GridMapBase {
-    public:
-        EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+public:
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-        /**
-         * @param {float} mapResolution
-         * @param {Vector2i} &size 
-         * @param {Vector2f} &offset world坐标系原点在map上的坐标
-         */    
-        GridMapBase(float mapResolution, const Eigen::Vector2i &size,
-                const Eigen::Vector2f &offset) : mapArray(0), lastUpdateIndex(-1) {
-            Eigen::Vector2i newMapDimensions(size);
-            this->setMapGridSize(newMapDimensions);
-            sizeX = size[0];
-            setMapTransformation(offset, mapResolution);
-            this->clear();
-        }
+    /**
+     * @param {float} map_resolution
+     * @param size grid map 的尺寸   
+     * @param map_in_world map坐标系原点在world坐标系的坐标
+     */    
+    GridMapBase(float map_resolution, const Eigen::Vector2i& size,
+            const Eigen::Vector2f& map_in_world) : mapArray_(nullptr), lastUpdateIndex_(-1) {
+        sizeX_ = size[0];
+        map_info_.grid_resolution = map_resolution;
+        rebuildMap(size);
+        setMapTransformation(map_in_world);
+        scaleToMap_ = 1.0f / map_resolution; 
+    }
 
-        /**
-         * Destructor
-         */
-        virtual ~GridMapBase()
-        {
-            deleteArray();
-        }
-
-        /**
-     * Indicates if given x and y are within map bounds
-     * @return True if coordinates are within map bounds
-     */
-        bool hasGridValue(int x, int y) const {
-            return (x >= 0) && (y >= 0) && (x < this->getSizeX()) && (y < this->getSizeY());
-        }
-
-        const Eigen::Vector2i &getMapDimensions() const { return mapDimensionProperties.getMapDimensions(); };
-        int getSizeX() const { return mapDimensionProperties.getSizeX(); };
-        int getSizeY() const { return mapDimensionProperties.getSizeY(); };
-
-        bool pointOutOfMapBounds(const Eigen::Vector2f &pointMapCoords) const
-        {
-            return mapDimensionProperties.pointOutOfMapBounds(pointMapCoords);
-        }
-
-        virtual void reset()
-        {
-            this->clear();
-        }
-
-        /**
-     * Resets the grid cell values by using the resetGridCell() function.
-     */
-        void clear()
-        {
-            int size = this->getSizeX() * this->getSizeY();
-
-            for (int i = 0; i < size; ++i)
-            {
-                this->mapArray[i].resetGridCell();
-            }
-
-            //this->mapArray[0].set(1.0f);
-            //this->mapArray[size-1].set(1.0f);
-        }
-
-        const MapDimensionProperties &getMapDimProperties() const { return mapDimensionProperties; };
-
-        /**
-     * Allocates memory for the two dimensional pointer array for map representation.
-     */
-        void allocateArray(const Eigen::Vector2i &newMapDims)
-        {
-            int sizeX = newMapDims.x();
-            int sizeY = newMapDims.y();
-
-            mapArray = new ConcreteCellType[sizeX * sizeY];
-
-            mapDimensionProperties.setMapCellDims(newMapDims);
-        }
-
-        void deleteArray()
-        {
-            if (mapArray != 0)
-            {
-                delete[] mapArray;
-
-                mapArray = 0;
-                mapDimensionProperties.setMapCellDims(Eigen::Vector2i(-1, -1));
-            }
-        }
-
-        ConcreteCellType &getCell(int x, int y)
-        {
-            return mapArray[y * sizeX + x];
-        }
-
-        const ConcreteCellType &getCell(int x, int y) const
-        {
-            return mapArray[y * sizeX + x];
-        }
-
-        ConcreteCellType &getCell(int index)
-        {
-            return mapArray[index];
-        }
-
-        const ConcreteCellType &getCell(int index) const
-        {
-            return mapArray[index];
-        }
-
-        void setMapGridSize(const Eigen::Vector2i &newMapDims)
-        {
-            if (newMapDims != mapDimensionProperties.getMapDimensions())
-            {
-                deleteArray();
-                allocateArray(newMapDims);
-                this->reset();
-            }
-        }
-
-        /**
+    /**
      * Copy Constructor, only needed if pointer members are present.
      */
-        GridMapBase(const GridMapBase &other)
-        {
-            allocateArray(other.getMapDimensions());
-            *this = other;
-        }
+    GridMapBase(const GridMapBase& other) {
+        allocateArray(other.getMapGridSize());
+        *this = other;
+    }
 
-        /**
+    /**
      * Assignment operator, only needed if pointer members are present.
      */
-        GridMapBase &operator=(const GridMapBase &other)
-        {
-            if (!(this->mapDimensionProperties == other.mapDimensionProperties))
-            {
-                this->setMapGridSize(other.mapDimensionProperties.getMapDimensions());
-            }
-
-            this->mapDimensionProperties = other.mapDimensionProperties;
-
-            this->worldTmap = other.worldTmap;
-            this->mapTworld = other.mapTworld;
-            this->worldTmap3D = other.worldTmap3D;
-
-            this->scaleToMap = other.scaleToMap;
-
-            //@todo potential resize
-            int sizeX = this->getSizeX();
-            int sizeY = this->getSizeY();
-
-            size_t concreteCellSize = sizeof(ConcreteCellType);
-
-            memcpy(this->mapArray, other.mapArray, sizeX * sizeY * concreteCellSize);
-
-            return *this;
+    GridMapBase& operator=(const GridMapBase& other) {
+        if (!(map_info_.map_grid_size == other.map_info_.map_grid_size)) {
+            rebuildMap(other.map_info_.map_grid_size);
         }
 
-        /**
+        map_info_ = other.map_info_; 
+        worldTmap_ = other.worldTmap_;
+        mapTworld_ = other.mapTworld_;
+        scaleToMap_ = other.scaleToMap_;
+        //@todo potential resize
+        int sizeX = getSizeX();
+        int sizeY = getSizeY();
+        size_t concreteCellSize = sizeof(_CellType);
+        memcpy(mapArray_, other.mapArray_, sizeX * sizeY * concreteCellSize);
+
+        return *this;
+    }
+
+    /**
+     * Destructor
+     */
+    virtual ~GridMapBase() {
+        deleteArray();
+    }
+
+    const Eigen::Vector2i& getMapGridSize() const { return map_info_.map_grid_size; }
+    int getSizeX() const { return map_info_.map_grid_size.x(); }
+    int getSizeY() const { return map_info_.map_grid_size.y(); }
+    int getMapGridSize() {return getSizeX() * getSizeY(); }
+
+    _CellType* createSameSizeMap() {
+        _CellType* mapArray = new _CellType[getMapGridSize()];
+        return mapArray; 
+    }
+
+    bool pointOutOfMapBounds(const Eigen::Vector2f& coords) const {
+        return ((coords[0] < 0.0f) || (coords[0] > (map_info_.map_grid_size.x() - 1)) 
+            || (coords[1] < 0.0f) || (coords[1] > (map_info_.map_grid_size.y() - 1)));
+    }
+
+    bool pointOutOfMapBounds(const Eigen::Vector2i& coords) const {
+        return ((coords[0] < 0) || (coords[0] > (map_info_.map_grid_size.x() - 1)) 
+            || (coords[1] < 0) || (coords[1] > (map_info_.map_grid_size.y() - 1)));
+    }
+
+    /**
+     * Resets the grid cell values by using the resetGridCell() function.
+     */
+    void clear() {
+        int size = getSizeX() * getSizeY();
+
+        for (int i = 0; i < size; ++i) {
+            mapArray_[i].resetGridCell();
+        }
+    }
+
+    /**
+     * Allocates memory for the two dimensional pointer array for map representation.
+     */
+    void allocateArray(const Eigen::Vector2i& new_size) {
+        int sizeX = new_size.x();
+        int sizeY = new_size.y();
+
+        mapArray_ = new _CellType[sizeX * sizeY];
+    }
+
+    void deleteArray() {
+        if (mapArray_ != nullptr) {
+            delete[] mapArray_;
+            mapArray_ = nullptr;
+        }
+    }
+
+    void resetArray(_CellType* new_mapArray) {
+        delete[] mapArray_;
+        mapArray_ = new_mapArray; 
+    }
+
+    _CellType& getCell(int x, int y) {
+        return mapArray_[y * sizeX_ + x];
+    }
+
+    const _CellType& getCell(int x, int y) const {
+        return mapArray_[y * sizeX_ + x];
+    }
+
+    _CellType& getCell(int index) {
+        return mapArray_[index];
+    }
+
+    const _CellType& getCell(int index) const {
+        return mapArray_[index];
+    }
+
+    void rebuildMap(const Eigen::Vector2i& new_size) {
+        if (new_size != map_info_.map_grid_size) {
+            deleteArray();
+            allocateArray(new_size);
+            map_info_.map_grid_size = new_size;
+        }
+        clear();   // 地图的数据清空 
+    }
+
+    /**
      * Returns the world coordinates for the given map coords.
      */
-        inline Eigen::Vector2f getWorldCoords(const Eigen::Vector2f &mapCoords) const
-        {
-            return worldTmap * mapCoords;
-        }
+    inline Eigen::Vector2f getWorldCoords(const Eigen::Vector2f& mapCoords) const {
+        return worldTmap_ * mapCoords;
+    }
 
-        /**
-     * Returns the map coordinates for the given world coords.
+    /**
+     * @brief 世界坐标下的坐标转到栅格地图坐标系下
      */
-        inline Eigen::Vector2f getMapCoords(const Eigen::Vector2f &worldCoords) const
-        {
-            return mapTworld * worldCoords;
-        }
+    inline Eigen::Vector2f getMapCoords(const Eigen::Vector2f& world_coords) const {
+        return mapTworld_ * world_coords;
+    }
 
-        /**
+    /**
      * Returns the world pose for the given map pose.
      */
-        inline Eigen::Vector3f getWorldCoordsPose(const Eigen::Vector3f &mapPose) const
-        {
-            Eigen::Vector2f worldCoords(worldTmap * mapPose.head<2>());
-            return Eigen::Vector3f(worldCoords[0], worldCoords[1], mapPose[2]);
-        }
+    inline Eigen::Vector3f getWorldCoordsPose(const Eigen::Vector3f& mapPose) const {
+        Eigen::Vector2f world_coords(worldTmap_ * mapPose.head<2>());
+        return Eigen::Vector3f(world_coords[0], world_coords[1], mapPose[2]);
+    }
 
-        /**
-         * @brief 将位姿 由相对世界坐标系 转换到相对 Map坐标系  
-         * @return Tmb   相对于Map坐标系的位姿 
-         */
-        inline Eigen::Vector3f getMapCoordsPose(const Eigen::Vector3f &worldPose) const
-        {
-            Eigen::Vector2f mapCoords(mapTworld * worldPose.head<2>());   // Tmw * Twb
-            return Eigen::Vector3f(mapCoords[0], mapCoords[1], worldPose[2]);
-        }
+    /**
+     * @brief 将位姿 由相对世界坐标系 转换到相对 Map坐标系  
+     * @return Tmb   相对于Map坐标系的位姿 
+     */
+    inline Eigen::Vector3f getMapCoordsPose(const Eigen::Vector3f& worldPose) const {
+         Eigen::Vector2f mapCoords(mapTworld_ * worldPose.head<2>());   // Tmw * Twb
+        return Eigen::Vector3f(mapCoords[0], mapCoords[1], worldPose[2]);
+    }
 
-        void setDimensionProperties(const Eigen::Vector2f &topLeftOffsetIn, const Eigen::Vector2i &mapDimensionsIn, float cellLengthIn)
-        {
-            setDimensionProperties(MapDimensionProperties(topLeftOffsetIn, mapDimensionsIn, cellLengthIn));
-        }
+    void setMapTransformation(const Eigen::Vector2f& map_in_world) {
+        worldTmap_ = Eigen::AlignedScaling2f(map_info_.grid_resolution, map_info_.grid_resolution) 
+                                        * Eigen::Translation2f(map_in_world[0] / map_info_.grid_resolution, 
+                                                                                    map_in_world[1] / map_info_.grid_resolution);
+        mapTworld_ = worldTmap_.inverse();
+    }
 
-        void setDimensionProperties(const MapDimensionProperties &newMapDimProps)
-        {
-            //Grid map cell number has changed
-            if (!newMapDimProps.hasEqualDimensionProperties(this->mapDimensionProperties))
-            {
-                this->setMapGridSize(newMapDimProps.getMapDimensions());     // 设置map的size 
-            }
-
-            //Grid map transformation/cell size has changed
-            if (!newMapDimProps.hasEqualTransformationProperties(this->mapDimensionProperties))
-            {
-                this->setMapTransformation(newMapDimProps.getTopLeftOffset(), newMapDimProps.getCellLength());
-            }
-        }
-
-        /**
-         * Set the map transformations
-         * @param world_in_map 世界坐标系原点在map坐标系的位置  
-         */
-        void setMapTransformation(const Eigen::Vector2f &world_in_map, float cellLength) {
-            mapDimensionProperties.setCellLength(cellLength);
-            mapDimensionProperties.setTopLeftOffset(world_in_map);
-
-            scaleToMap = 1.0f / cellLength;
-            // AlignedScaling2f 为一个尺度变换对角阵    Translation2f 为一个2维平移变换  
-            mapTworld = Eigen::AlignedScaling2f(scaleToMap, scaleToMap) 
-                                            * Eigen::Translation2f(world_in_map[0], world_in_map[1]);
-            worldTmap3D = Eigen::AlignedScaling3f(scaleToMap, scaleToMap, 1.0f) 
-                                            * Eigen::Translation3f(world_in_map[0], world_in_map[1], 0);
-            //std::cout << worldTmap3D.matrix() << std::endl;
-            worldTmap3D = worldTmap3D.inverse();
-            worldTmap = mapTworld.inverse();
-        }
-
-        /**
+    /**
      * Returns the scale factor for one unit in world coords to one unit in map coords.
      * @return The scale factor
      */
-        float getScaleToMap() const
-        {
-            return scaleToMap;
-        }
+    float getScaleToMap() const {
+        return scaleToMap_;
+    }
 
-        /**
-     * Returns the cell edge length of grid cells in millimeters.
-     * @return the cell edge length in millimeters.
-     */
-        float getCellLength() const
-        {
-            return mapDimensionProperties.getCellLength();
-        }
+    /**
+ * Returns the cell edge length of grid cells in millimeters.
+ * @return the cell edge length in millimeters.
+ */
+    float getCellLength() const {
+        return map_info_.grid_resolution;
+    }
 
-        /**
+    /**
      * Returns a reference to the homogenous 2D transform from map to world coordinates.
      * @return The homogenous 2D transform.
      */
-        const Eigen::Affine2f &getWorldTmap() const
-        {
-            return worldTmap;
-        }
-
-        /**
-     * Returns a reference to the homogenous 3D transform from map to world coordinates.
-     * @return The homogenous 3D transform.
-     */
-        const Eigen::Affine3f &getWorldTmap3D() const
-        {
-            return worldTmap3D;
-        }
+    const Eigen::Affine2f &getWorldTmap() const {
+        return worldTmap_;
+    }
 
     /**
      * Returns a reference to the homogenous 2D transform from world to map coordinates.
      * @return The homogenous 2D transform.
      */
-        const Eigen::Affine2f &getMapTworld() const
+    const Eigen::Affine2f& getMapTworld() const {
+        return mapTworld_;
+    }
+
+    void setUpdated() { lastUpdateIndex_++; };
+    int getUpdateIndex() const { return lastUpdateIndex_; };
+
+    /**
+    * Returns the rectangle ([xMin,yMin],[xMax,xMax]) containing non-default cell values
+    */
+    bool getMapExtends(int &xMax, int &yMax, int &xMin, int &yMin) const {
+        int lowerStart = -1;
+        int upperStart = 10000;
+
+        int xMaxTemp = lowerStart;
+        int yMaxTemp = lowerStart;
+        int xMinTemp = upperStart;
+        int yMinTemp = upperStart;
+
+        int sizeX = getSizeX();
+        int sizeY = getSizeY();
+
+        for (int x = 0; x < sizeX; ++x)
         {
-            return mapTworld;
-        }
-
-        void setUpdated() { lastUpdateIndex++; };
-        int getUpdateIndex() const { return lastUpdateIndex; };
-
-        /**
-        * Returns the rectangle ([xMin,yMin],[xMax,xMax]) containing non-default cell values
-        */
-        bool getMapExtends(int &xMax, int &yMax, int &xMin, int &yMin) const
-        {
-            int lowerStart = -1;
-            int upperStart = 10000;
-
-            int xMaxTemp = lowerStart;
-            int yMaxTemp = lowerStart;
-            int xMinTemp = upperStart;
-            int yMinTemp = upperStart;
-
-            int sizeX = this->getSizeX();
-            int sizeY = this->getSizeY();
-
-            for (int x = 0; x < sizeX; ++x)
+            for (int y = 0; y < sizeY; ++y)
             {
-                for (int y = 0; y < sizeY; ++y)
+                if (this->mapArray_[x][y].getValue() != 0.0f)
                 {
-                    if (this->mapArray[x][y].getValue() != 0.0f)
+
+                    if (x > xMaxTemp)
                     {
+                        xMaxTemp = x;
+                    }
 
-                        if (x > xMaxTemp)
-                        {
-                            xMaxTemp = x;
-                        }
+                    if (x < xMinTemp)
+                    {
+                        xMinTemp = x;
+                    }
 
-                        if (x < xMinTemp)
-                        {
-                            xMinTemp = x;
-                        }
+                    if (y > yMaxTemp)
+                    {
+                        yMaxTemp = y;
+                    }
 
-                        if (y > yMaxTemp)
-                        {
-                            yMaxTemp = y;
-                        }
-
-                        if (y < yMinTemp)
-                        {
-                            yMinTemp = y;
-                        }
+                    if (y < yMinTemp)
+                    {
+                        yMinTemp = y;
                     }
                 }
             }
-
-            if ((xMaxTemp != lowerStart) &&
-                (yMaxTemp != lowerStart) &&
-                (xMinTemp != upperStart) &&
-                (yMinTemp != upperStart))
-            {
-
-                xMax = xMaxTemp;
-                yMax = yMaxTemp;
-                xMin = xMinTemp;
-                yMin = yMinTemp;
-                return true;
-            }
-            else
-            {
-                return false;
-            }
         }
 
-    protected:
-        ConcreteCellType *mapArray; ///< Map representation used with plain pointer array.
+        if ((xMaxTemp != lowerStart) &&
+            (yMaxTemp != lowerStart) &&
+            (xMinTemp != upperStart) &&
+            (yMinTemp != upperStart))
+        {
+            xMax = xMaxTemp;
+            yMax = yMaxTemp;
+            xMin = xMinTemp;
+            yMin = yMinTemp;
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
 
-        float scaleToMap; ///< Scaling factor from world to map.
+protected:
+    struct Info {
+        Eigen::Vector2i map_grid_size{0, 0};    // 地图 xy方向 grid的数量   即维度  
+        float grid_resolution = 0; 
+    } map_info_;
+    _CellType* mapArray_; ///< Map representation used with plain pointer array.
 
-        Eigen::Affine2f worldTmap;   ///< Homogenous 2D transform from map to world coordinates.
-        Eigen::Affine3f worldTmap3D; ///< Homogenous 3D transform from map to world coordinates.
-        Eigen::Affine2f mapTworld;   ///< Homogenous 2D transform from world to map coordinates.
+    float scaleToMap_; ///< Scaling factor from world to map.
 
-        MapDimensionProperties mapDimensionProperties;
-        int sizeX;
+    Eigen::Affine2f worldTmap_;   ///< Homogenous 2D transform from map to world coordinates.
+    Eigen::Affine2f mapTworld_;   ///< Homogenous 2D transform from world to map coordinates.
 
-    private:
-        int lastUpdateIndex;
+    int sizeX_;
+
+private:
+    int lastUpdateIndex_;
 };
 }
-
-#endif

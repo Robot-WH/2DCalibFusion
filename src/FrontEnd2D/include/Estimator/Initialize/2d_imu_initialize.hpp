@@ -68,8 +68,9 @@ private:
     }
 
     bool motionInit() {
-
+        return false; 
     }
+    
     uint16_t static_init_N_ = 1; 
     float yaw_velocity_avg_ = 0;
     float yaw_velocity_var_ = 0; 

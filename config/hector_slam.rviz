@@ -11,6 +11,7 @@ Panels:
         - /Odometry3/Shape1
         - /Odom_hector1/Shape1
         - /TF1/Frames1
+        - /PointCloud3
       Splitter Ratio: 0.5
     Tree Height: 460
   - Class: rviz/Selection
@@ -363,7 +364,63 @@ Visualization Manager:
       Size (Pixels): 3
       Size (m): 0.10000000149011612
       Style: Flat Squares
-      Topic: /undistorted_pointcloud
+      Topic: /stable_laser_points
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud
+      Color: 115; 210; 22
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: PointCloud
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.10000000149011612
+      Style: Flat Squares
+      Topic: /stable_laser_points
+      Unreliable: false
+      Use Fixed Frame: true
+      Use rainbow: true
+      Value: true
+    - Alpha: 1
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds:
+        Max Value: 10
+        Min Value: -10
+        Value: true
+      Axis: Z
+      Channel Name: intensity
+      Class: rviz/PointCloud
+      Color: 239; 41; 41
+      Color Transformer: FlatColor
+      Decay Time: 0
+      Enabled: true
+      Invert Rainbow: false
+      Max Color: 255; 255; 255
+      Min Color: 0; 0; 0
+      Name: PointCloud
+      Position Transformer: XYZ
+      Queue Size: 10
+      Selectable: true
+      Size (Pixels): 3
+      Size (m): 0.10000000149011612
+      Style: Flat Squares
+      Topic: /dynamic_laser_points
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
@@ -405,11 +462,11 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 47.31541442871094
+      Scale: 63.64418411254883
       Target Frame: odom
       Value: TopDownOrtho (rviz)
-      X: 2.0518174171447754
-      Y: -2.461611747741699
+      X: -0.5210315585136414
+      Y: -2.64223313331604
     Saved: ~
 Window Geometry:
   Displays:

@@ -48,8 +48,6 @@ public:
     void setOrigo(const Eigen::Vector2f &origoIn) {
         origo = origoIn;
     }
-
-protected:
     std::vector<Eigen::Vector2f> dataPoints;
     Eigen::Vector2f origo{0, 0};    // 实际激光雷达的观测位置  laser到base的位置外参  
 };

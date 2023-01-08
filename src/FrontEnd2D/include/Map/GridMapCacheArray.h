@@ -31,8 +31,7 @@
 
 #include <Eigen/Core>
 
-class CachedMapElement
-{
+struct CachedMapElement {
 public:
     float val;
     int index;
@@ -41,38 +40,32 @@ public:
 /**
  * 网格缓存，类似于计算机的cache，保存最近访问过的网格的概率值（非logOddsVal值）。
  * 避免重复访问同一网格时，重复计算其概率值。（Cell中只保存了logOddsVal值）
- *
- *
  * Caches filtered grid map accesses in a two dimensional array of the same size as the map.
  */
-class GridMapCacheArray
-{
+class GridMapCacheArray {
 public:
     /**
    * Constructor
    */
     GridMapCacheArray()
-        : cacheArray(0), arrayDimensions(-1, -1)
-    {
-        currCacheIndex = 0;
+        : cacheArray_(0), arrayDimensions_(-1, -1) {
+        currCacheIndex_ = 0;
     }
 
     /**
    * Destructor
    */
-    ~GridMapCacheArray()
-    {
+    ~GridMapCacheArray() {
         deleteCacheArray();
     }
 
     /**
    * Resets/deletes the cached data
-   * 只有当  CachedMapElement.index == currCacheIndex 时，元素有效
+   * 只有当  CachedMapElement.index == currCacheIndex_ 时，元素有效
    * 改变currCacheIndex的值，使当前cache内所有元素无效
    */
-    void resetCache()
-    {
-        currCacheIndex++;
+    void resetCache() {
+        currCacheIndex_++;
     }
 
     /**
@@ -81,17 +74,13 @@ public:
    * @param val Reference to a float the data is written to if available
    * @return Indicates if cached data is available
    */
-    bool containsCachedData(int index, float &val)
-    {
-        const CachedMapElement &elem(cacheArray[index]);
+    bool containsCachedData(int index, float &val) {
+        const CachedMapElement& elem(cacheArray_[index]);
 
-        if (elem.index == currCacheIndex)
-        {
+        if (elem.index == currCacheIndex_) {
             val = elem.val;
             return true;
-        }
-        else
-        {
+        } else {
             return false;
         }
     }
@@ -101,10 +90,9 @@ public:
      * @param coords The coordinates
      * @param val The value to be cached for coordinates.
      */
-    void cacheData(int index, float val)
-    {
-        CachedMapElement &elem(cacheArray[index]);
-        elem.index = currCacheIndex;
+    void cacheData(int index, float val) {
+        CachedMapElement &elem(cacheArray_[index]);
+        elem.index = currCacheIndex_;
         elem.val = val;
     }
 
@@ -112,8 +100,7 @@ public:
    * Sets the map size and resizes the cache array accordingly
    * @param sizeIn The map size.
    */
-    void setMapSize(const Eigen::Vector2i &newDimensions)
-    {
+    void setMapSize(const Eigen::Vector2i &newDimensions) {
         setArraySize(newDimensions);
     }
 
@@ -122,52 +109,46 @@ protected:
    * Creates a cache array of size sizeIn.
    * @param sizeIn The size of the array
    */
-    void createCacheArray(const Eigen::Vector2i &newDimensions)
-    {
-        arrayDimensions = newDimensions;
+    void createCacheArray(const Eigen::Vector2i& newDimensions) {
+        arrayDimensions_ = newDimensions;
 
-        int sizeX = arrayDimensions[0];
-        int sizeY = arrayDimensions[1];
+        int sizeX = arrayDimensions_[0];
+        int sizeY = arrayDimensions_[1];
 
         int size = sizeX * sizeY;
 
-        cacheArray = new CachedMapElement[size];
+        cacheArray_ = new CachedMapElement[size];
 
-        for (int x = 0; x < size; ++x)
-        {
-            cacheArray[x].index = -1;
+        for (int x = 0; x < size; ++x) {
+            cacheArray_[x].index = -1;
         }
     }
 
     /**
    * Deletes the existing cache array.
    */
-    void deleteCacheArray()
-    {
-        delete[] cacheArray;
+    void deleteCacheArray() {
+        delete[] cacheArray_;
     }
 
     /**
-   * Sets a new cache array size
-   */
-    void setArraySize(const Eigen::Vector2i &newDimensions)
-    {
-        if (this->arrayDimensions != newDimensions)
-        {
-            if (cacheArray != 0)
-            {
+     * Sets a new cache array size
+     */
+    void setArraySize(const Eigen::Vector2i &newDimensions) {
+        if (this->arrayDimensions_ != newDimensions) {
+            if (cacheArray_ != 0) {
                 deleteCacheArray();
-                cacheArray = 0;
+                cacheArray_ = 0;
             }
             createCacheArray(newDimensions);
         }
     }
 
 protected:
-    CachedMapElement *cacheArray; ///< Array used for caching data.
-    int currCacheIndex;           ///< The cache iteration index value
+    CachedMapElement* cacheArray_; ///< Array used for caching data.
+    int currCacheIndex_;           ///< The cache iteration index value
 
-    Eigen::Vector2i arrayDimensions; ///< The size of the array
+    Eigen::Vector2i arrayDimensions_; ///< The size of the array
 };
 
 #endif

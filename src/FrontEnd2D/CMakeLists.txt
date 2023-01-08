@@ -28,6 +28,10 @@ else()
 endif()
 find_package(libnabo REQUIRED PATHS ${LIBNABO_INSTALL_DIR} )
 
+# find_package(libpointmatcher 1.1.0 REQUIRED)
+# include_directories("${libpointmatcher_INCLUDE_DIRS}")
+# message(STATUS "Using libpointmatcher version ${libpointmatcher_VERSION}")
+
 
 ###########
 ## Build ##
@@ -43,3 +47,6 @@ include_directories(
   ${Boost_INCLUDE_DIRS}
   ${libnabo_INCLUDE_DIRS}
 )
+
+add_library(libLaserAlgorithm SHARED 
+  src/imls_icp.cpp)

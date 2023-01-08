@@ -46,7 +46,7 @@ public:
     OccGridMapUtil(const ConcreteOccGridMap *gridMap)
         : concreteGridMap(gridMap), size(0) {
         mapObstacleThreshold = gridMap->getObstacleThreshold();
-        cacheMethod.setMapSize(gridMap->getMapDimensions());
+        cacheMethod.setMapSize(gridMap->getMapGridSize());
     }
 
     ~OccGridMapUtil() {
@@ -60,121 +60,6 @@ public:
     inline Eigen::Vector3f getMapCoordsPose(const Eigen::Vector3f &worldPose) const { return concreteGridMap->getMapCoordsPose(worldPose); };
     /** 地图点坐标转换到世界系坐标 **/
     inline Eigen::Vector2f getWorldCoordsPoint(const Eigen::Vector2f &mapPoint) const { return concreteGridMap->getWorldCoords(mapPoint); };
-
-    /**
-     * 使用当前pose投影dataPoints到地图，计算出 H 矩阵 b列向量， 理论部分详见Hector论文： 《A Flexible and Scalable SLAM System with Full 3D Motion Estimation》.
-     * @param pose    地图系上的位姿
-     * @param dataPoints  已转换为地图尺度的激光点数据
-     * @param H   需要计算的 H矩阵
-     * @param dTr  需要计算的 g列向量
-     */
-    void getCompleteHessianDerivs(const Eigen::Vector3f &pose,
-                                const LaserPointContainer &dataPoints,
-                                Eigen::Matrix3f &H,
-                                Eigen::Vector3f &dTr) {
-        int size = dataPoints.getSize();
-        // 获取变换矩阵
-        Eigen::Isometry2f transform(getTransformForState(pose));
-        float sinRot = sin(pose[2]);
-        float cosRot = cos(pose[2]);
-        H = Eigen::Matrix3f::Zero();
-        dTr = Eigen::Vector3f::Zero();
-        // 按照公式计算H、b
-        for (int i = 0; i < size; ++i) {
-            // 地图尺度下的激光坐标系下的激光点坐标
-            const Eigen::Vector2f &currPoint(dataPoints.getVecEntry(i));
-            // 将激光点坐标转换到地图系上, 通过双线性插值计算栅格概率
-            // transformedPointData[0]--通过插值得到的栅格值
-            // transformedPointData[1]--栅格值x方向的梯度
-            // transformedPointData[2]--栅格值y方向的梯度
-            Eigen::Vector3f transformedPointData(interpMapValueWithDerivatives(transform * currPoint));
-            // 目标函数f(x)  (1-M(Pm))
-            float funVal = 1.0f - transformedPointData[0];
-            // 计算g列向量的 x 与 y 方向的值
-            dTr[0] += transformedPointData[1] * funVal;
-            dTr[1] += transformedPointData[2] * funVal;
-            // 根据公式计算
-            float rotDeriv = ((-sinRot * currPoint.x() - cosRot * currPoint.y()) * transformedPointData[1] +
-                              (cosRot * currPoint.x() - sinRot * currPoint.y()) * transformedPointData[2]);
-            // 计算g列向量的 角度 的值
-            dTr[2] += rotDeriv * funVal;
-            // 计算 hessian 矩阵
-            H(0, 0) += util::sqr(transformedPointData[1]);
-            H(1, 1) += util::sqr(transformedPointData[2]);
-            H(2, 2) += util::sqr(rotDeriv);
-
-            H(0, 1) += transformedPointData[1] * transformedPointData[2];
-            H(0, 2) += transformedPointData[1] * rotDeriv;
-            H(1, 2) += transformedPointData[2] * rotDeriv;
-        }
-        // H是对称矩阵，只算上三角就行， 减少计算量。
-        H(1, 0) = H(0, 1);
-        H(2, 0) = H(0, 2);
-        H(2, 1) = H(1, 2);
-    }
-
-    /**
-     * 双线性插值计算网格中任一点的得分（占据概率）以及该点处的梯度
-     * @param coords  激光点地图坐标
-     * @return ret(0) 是网格值 ， ret(1) 是栅格值在x方向的导数 ， ret(2)是栅格值在y方向的导数
-     */
-    Eigen::Vector3f interpMapValueWithDerivatives(const Eigen::Vector2f &coords) {
-        // 检查coords坐标是否是在地图坐标范围内
-        if (concreteGridMap->pointOutOfMapBounds(coords)) {
-            return Eigen::Vector3f(0.0f, 0.0f, 0.0f);
-        }
-        // 对坐标进行向下取整，即得到坐标(x0,y0)
-        Eigen::Vector2i indMin(coords.cast<int>());
-        // 得到双线性插值的因子
-        Eigen::Vector2f factors(coords - indMin.cast<float>());
-        // 获得地图的X方向最大边界
-        int sizeX = concreteGridMap->getSizeX();
-        // 计算(x0, y0)点的网格索引值
-        int index = indMin[1] * sizeX + indMin[0]; 
-        // 下边这取4个点的栅格值，感觉就是导致hector大地图后计算变慢的原因
-        /** 首先判断cache中该地图点在本次scan中是否被访问过，若有则直接取值；没有则立马计算概率值并更新到cache **/
-        /** 这个cache的作用是，避免单次scan重复访问同一网格时带来的重复概率计算。地图更新后，网格logocc改变，cache数据就会无效。 **/
-        /** 但是这种方式内存开销太大..相当于同时维护两份地图，使用 hash map 是不是会更合适些 **/
-        // if (!cacheMethod.containsCachedData(index, intensities[0])) {
-            intensities[0] = getUnfilteredGridPoint(index); // 得到M(P00),P00(x0,y0)
-        //     cacheMethod.cacheData(index, intensities[0]);
-        // }
-
-        ++index;
-        // if (!cacheMethod.containsCachedData(index, intensities[1])) {
-            intensities[1] = getUnfilteredGridPoint(index);
-        //     cacheMethod.cacheData(index, intensities[1]);
-        // }
-
-        index += sizeX - 1;
-        // if (!cacheMethod.containsCachedData(index, intensities[2])) {
-            intensities[2] = getUnfilteredGridPoint(index);
-        //     cacheMethod.cacheData(index, intensities[2]);
-        // }
-
-        ++index;
-        // if (!cacheMethod.containsCachedData(index, intensities[3])) {
-            intensities[3] = getUnfilteredGridPoint(index);
-        //     cacheMethod.cacheData(index, intensities[3]);
-        // }
-
-        float dx1 = intensities[0] - intensities[1]; // 求得(M(P00) - M(P10))的值
-        float dx2 = intensities[2] - intensities[3]; // 求得(M(P01) - M(P11))的值
-        float dy1 = intensities[0] - intensities[2]; // 求得(M(P00) - M(P01))的值
-        float dy2 = intensities[1] - intensities[3]; // 求得(M(P10) - M(P11))的值
-        // 得到双线性插值的因子
-        float xFacInv = (1.0f - factors[0]); // 求得(x1-x)的值
-        float yFacInv = (1.0f - factors[1]); // 求得(y1-y)的值
-        // 计算网格值，计算梯度 --- 原版这里的dx、dy的计算有错误，已经改过来了
-        return Eigen::Vector3f(
-            ((intensities[0] * xFacInv + intensities[1] * factors[0]) * (yFacInv)) +
-                ((intensities[2] * xFacInv + intensities[3] * factors[0]) * (factors[1])),
-            -((dx1 * yFacInv) + (dx2 * factors[1])),
-            -((dy1 * xFacInv) + (dy2 * factors[0]))
-            // -((dx1 * xFacInv) + (dx2 * factors[0])), // 改为： -((dx1 * yFacInv) + (dx2 * factors[1]))
-            // -((dy1 * yFacInv) + (dy2 * factors[1]))  // 改为： -((dy1 * xFacInv) + (dy2 * factors[0]))
-        );
-    }
 
     float getUnfilteredGridPoint(int index) const {
         return (concreteGridMap->getGridProbabilityMap(index));

@@ -59,15 +59,15 @@ target_link_libraries(occupancy_grid_node
 
 
 ## SLAM
-add_executable(2d_slam_node
+add_executable(slam2d_node
   src/slam2d_node.cc
 )
 
-add_dependencies(2d_slam_node
+add_dependencies(slam2d_node
   ${catkin_EXPORTED_TARGETS}
 )
 
-target_link_libraries(2d_slam_node
+target_link_libraries(slam2d_node
   ${catkin_LIBRARIES}
   ${Boost_LIBRARIES}
   yaml-cpp

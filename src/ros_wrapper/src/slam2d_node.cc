@@ -48,6 +48,10 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
         node_handle_.advertise<nav_msgs::Odometry>("odom_wheelDeadReckoning", 50);
     undistorted_pointcloud_publisher_ = node_handle_.advertise<sensor_msgs::PointCloud>(
         "undistorted_pointcloud", 10, this);
+    dynamic_pointcloud_publisher_ = node_handle_.advertise<sensor_msgs::PointCloud>(
+        "dynamic_laser_points", 10, this);
+    stable_pointcloud_publisher_ = node_handle_.advertise<sensor_msgs::PointCloud>(
+        "stable_laser_points", 10, this);
 
     tf_base_to_odom_ = new tf::TransformBroadcaster();
     tf_laser_to_base_ = new tf::TransformBroadcaster();
@@ -76,6 +80,18 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
                                                                                                     this, 
                                                                                                     5,
                                                                                                     true); // 高优先级  
+    // 动态点
+    util::DataDispatcher::GetInstance().Subscribe("dynamic_pointcloud", 
+                                                                                                    &HectorMappingRos::dynamicPointsCallback, 
+                                                                                                    this, 
+                                                                                                    5,
+                                                                                                    true); // 高优先级  
+    // 静态点
+    util::DataDispatcher::GetInstance().Subscribe("stable_pointcloud", 
+                                                                                                    &HectorMappingRos::stablePointsCallback, 
+                                                                                                    this, 
+                                                                                                    5,
+                                                                                                    true); // 高优先级                                                                                                  
     std::string config_path = RosUtils::RosReadParam<std::string>(node_handle_, "ConfigPath");
 
     estimator_ = new FrontEndEstimator(config_path);
@@ -91,7 +107,6 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
     std::string mapTopic_ = "map";
     for (int i = 0; i < mapLevels; ++i) {
         mapPubContainer.push_back(MapPublisherContainer());
-        estimator_->AddMapMutex(i, new HectorMapMutex());
         std::string mapTopicStr(mapTopic_);
 
         if (i != 0) {
@@ -101,14 +116,14 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
         std::string mapMetaTopicStr(mapTopicStr);
         mapMetaTopicStr.append("_metadata");
 
-        MapPublisherContainer &tmp = mapPubContainer[i];
+        MapPublisherContainer& tmp = mapPubContainer[i];
         tmp.mapPublisher_ = node_handle_.advertise<nav_msgs::OccupancyGrid>(mapTopicStr, 1, true);
         tmp.mapMetadataPublisher_ = node_handle_.advertise<nav_msgs::MapMetaData>(mapMetaTopicStr, 1, true);
 
         setMapInfo(tmp.map_, estimator_->GetGridMap(i)); // 设置地图服务
 
         if (i == 0) {
-            mapPubContainer[i].mapMetadataPublisher_.publish(mapPubContainer[i].map_.map.info);
+            mapPubContainer[i].mapMetadataPublisher_.publish(tmp.map_.map.info);
         }
     }
     // 新建一个线程用来发布地图
@@ -380,6 +395,7 @@ void HectorMappingRos::lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 
     ext_prime_laser_to_odom_ = ext;  
     std::cout << "Recieve lidar-odom extrinsic : " << ext_prime_laser_to_odom_.transpose() <<std::endl;
 } 
+
 // 原始wheel 航迹推算，调试用
 void HectorMappingRos::wheelOdomDeadReckoningCallback(const TimedPose2d& pose) {
     geometry_msgs::PoseWithCovarianceStamped pose_info = 
@@ -393,6 +409,7 @@ void HectorMappingRos::wheelOdomDeadReckoningCallback(const TimedPose2d& pose) {
     // tmp.child_frame_id = baseFrame_name_;
     wheelOdomDeadReckoningPublisher_.publish(tmp);
 }
+
 // 接收到去畸变的点云
 void HectorMappingRos::undistortedPointcloudCallback(const LaserPointCloud::Ptr& data) {
     // std::cout << common::GREEN << "send undistortedPointcloud ----------------------------" 
@@ -413,6 +430,43 @@ void HectorMappingRos::undistortedPointcloudCallback(const LaserPointCloud::Ptr&
     pointcloud_msg.header.frame_id = primeLaserFrame_name_;
     undistorted_pointcloud_publisher_.publish(pointcloud_msg);
 }
+
+void HectorMappingRos::dynamicPointsCallback(const std::pair<std::vector<LaserPoint>, double>& data) {
+    sensor_msgs::PointCloud pointcloud_msg;
+    uint16_t size = data.first.size(); 
+    pointcloud_msg.points.reserve(size);
+
+    for (uint16_t i = 0; i < size; ++i) {
+        geometry_msgs::Point32 point; 
+        point.x = data.first[i].pos_[0];
+        point.y = data.first[i].pos_[1];
+        point.z = 0;
+        pointcloud_msg.points.push_back(point);
+    }
+    pointcloud_msg.header.stamp = ros::Time(data.second); 
+    // pointcloud_msg.header.stamp = ros::Time::now(); 
+    pointcloud_msg.header.frame_id = primeLaserFrame_name_;
+    dynamic_pointcloud_publisher_.publish(pointcloud_msg);
+}
+
+void HectorMappingRos::stablePointsCallback(const std::pair<std::vector<LaserPoint>, double>& data) {
+    sensor_msgs::PointCloud pointcloud_msg;
+    uint16_t size = data.first.size(); 
+    pointcloud_msg.points.reserve(size);
+
+    for (uint16_t i = 0; i < size; ++i) {
+        geometry_msgs::Point32 point; 
+        point.x = data.first[i].pos_[0];
+        point.y = data.first[i].pos_[1];
+        point.z = 0;
+        pointcloud_msg.points.push_back(point);
+    }
+    pointcloud_msg.header.stamp = ros::Time(data.second); 
+    // pointcloud_msg.header.stamp = ros::Time::now(); 
+    pointcloud_msg.header.frame_id = primeLaserFrame_name_;
+    stable_pointcloud_publisher_.publish(pointcloud_msg);
+}
+
 // 将点云数据转换成Hector中雷达数据的格式
 bool HectorMappingRos::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan_msg, 
                                                                                                                         LaserPointCloud& laser) {
@@ -442,8 +496,8 @@ bool HectorMappingRos::rosPointCloudToDataContainer(const sensor_msgs::LaserScan
 }
 
 // 对ROS地图进行数据初始化与分配内存
-void HectorMappingRos::setMapInfo(nav_msgs::GetMap::Response &map_, const hectorslam::GridMap &gridMap) {
-    Eigen::Vector2f mapOrigin(gridMap.getWorldCoords(Eigen::Vector2f::Zero()));
+void HectorMappingRos::setMapInfo(nav_msgs::GetMap::Response& map_, const hectorslam::GridMap& gridMap) {
+    Eigen::Vector2f mapOrigin(gridMap.getWorldCoords(Eigen::Vector2f::Zero()));   // Map原点的world坐标
     mapOrigin.array() -= gridMap.getCellLength() * 0.5f;
 
     map_.map.info.origin.position.x = mapOrigin.x();
@@ -471,10 +525,10 @@ void HectorMappingRos::publishMapLoop(double map_pub_period) {
 }
 
 // 发布ROS地图
-void HectorMappingRos::publishMap(MapPublisherContainer &mapPublisher,
-                                  const hectorslam::GridMap &gridMap,
-                                  ros::Time timestamp, MapLockerInterface *mapMutex) {
-    nav_msgs::GetMap::Response &map_(mapPublisher.map_);
+void HectorMappingRos::publishMap(MapPublisherContainer& mapPublisher,
+                                  const hectorslam::GridMap& gridMap,
+                                  ros::Time timestamp, std::mutex* mapMutex) {
+    nav_msgs::GetMap::Response& map_(mapPublisher.map_);
     //only update map if it changed
     if (lastGetMapUpdateIndex != gridMap.getUpdateIndex()) {
         int sizeX = gridMap.getSizeX();
@@ -482,13 +536,12 @@ void HectorMappingRos::publishMap(MapPublisherContainer &mapPublisher,
         int size = sizeX * sizeY;
         std::vector<int8_t> &data = map_.map.data;
         //std::vector contents are guaranteed to be contiguous, use memset to set all to unknown to save time in loop
-        memset(&data[0], -1, sizeof(int8_t) * size);
+        memset(&data[0], -1, sizeof(int8_t) * size);     
 
-        if (mapMutex) {
-            mapMutex->lockMap();
-        }
+        mapMutex->lock();
 
         for (int i = 0; i < size; ++i) {
+            // 空闲：0， 占据：100，未知：-1
             if (gridMap.isFree(i)) {
                 data[i] = 0;
             } else if (gridMap.isOccupied(i)) {
@@ -497,10 +550,13 @@ void HectorMappingRos::publishMap(MapPublisherContainer &mapPublisher,
         }
 
         lastGetMapUpdateIndex = gridMap.getUpdateIndex();
+        Eigen::Vector2f mapOrigin(gridMap.getWorldCoords(Eigen::Vector2f::Zero()));   // Map原点的world坐标
+        mapOrigin.array() -= gridMap.getCellLength() * 0.5f;
 
-        if (mapMutex) {
-            mapMutex->unlockMap();
-        }
+        map_.map.info.origin.position.x = mapOrigin.x();
+        map_.map.info.origin.position.y = mapOrigin.y();
+
+        mapMutex->unlock();
     }
 
     map_.map.header.stamp = timestamp;

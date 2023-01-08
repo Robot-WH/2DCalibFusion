@@ -47,6 +47,7 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
+add_subdirectory(src/Lib/libpointmatcher-master)
 add_subdirectory(src/FrontEnd2D)
 add_subdirectory(src/ros_wrapper)
 

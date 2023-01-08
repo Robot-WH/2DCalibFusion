@@ -116,7 +116,7 @@ class Pose2d {
         }  
 
         // 重载  T*P
-        const Eigen::Vector2f operator*(const Eigen::Vector2f& p) {  
+        const Eigen::Vector2f operator*(const Eigen::Vector2f& p) const {  
             Eigen::Matrix2f R;
             R << cos(vec_[2]), -sin(vec_[2]),
             sin(vec_[2]), cos(vec_[2]);

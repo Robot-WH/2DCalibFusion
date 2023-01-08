@@ -23,9 +23,7 @@ namespace util {
 class DataContainerBase {
     public:
         DataContainerBase(uint16_t const& capacity) : capacity_(capacity) {}
-        virtual ~DataContainerBase() {
-            // std::cout << "~DataContainerBase()" <<std::endl;
-        }
+        virtual ~DataContainerBase() {}
         virtual inline std::type_index GetDataType() const = 0; 
         virtual inline uint16_t GetDataSize() const = 0; 
         virtual inline void DeleteFrontData() = 0; 
@@ -47,9 +45,8 @@ template<typename _DataT>
 class DataContainerImpl : public DataContainerBase {
     public:
         DataContainerImpl(uint16_t const& capacity, FunctionBase* p_callback_wrapper) 
-        : DataContainerBase(capacity), 
-        p_callback_wrapper_(p_callback_wrapper), 
-        type_info_(typeid(_DataT)) {}    // typeid 不区分const和&  也就是 const int& 和 int 是一样的
+        : DataContainerBase(capacity), p_callback_wrapper_(p_callback_wrapper), 
+            type_info_(typeid(_DataT)) {}    // typeid 不区分const和&  也就是 const int& 和 int 是一样的
         
         ~DataContainerImpl() {
             // std::cout << "~DataContainerImpl()" <<std::endl;
@@ -260,6 +257,7 @@ class DataDispatcher {
         /**
          * @brief: 订阅某个数据容器，回调函数为类内成员的重载 
          * @details: 订阅动作，告知DataDispatcher，_Ctype类对象的callback函数要订阅名字为name的数据容器
+         * @param _DataT 回调函数的输入类型  
          * @param name 数据容器名
          * @param callback 注册的回调函数
          * @param class_addr 类对象地址

@@ -15,6 +15,7 @@
 
 #include <sys/time.h>
 
+namespace hectorslam {
 
 class IMLSICPMatcher {
 public:
@@ -36,7 +37,7 @@ public:
 
     void setTargetPointCloud(pcl::PointCloud<pcl::PointXYZ>& pcl_cloud);
 
-    void createKDTreeUsingLocalMap(void );
+    void createKDTreeUsingLocalMap();
 
 
     //IMLS函数，主要功能为进行把xi投影到表面上．
@@ -81,7 +82,6 @@ private:
     Nabo::NNSearchD* m_pSourceKDTree;
 
     Eigen::MatrixXd m_sourceKDTreeDataBase;
-
     Eigen::MatrixXd m_targetKDTreeDataBase;
 
     //迭代次数．
@@ -101,3 +101,4 @@ private:
     bool m_isGetNormals;
 
 };
+}

@@ -1,3 +1,6 @@
+sensor:
+    laser:
+        valid_distance: 15    # 激光的有效距离 
 # 传感器外参
 extrinsic:
   odom: 
@@ -8,9 +11,9 @@ extrinsic:
 # 栅格地图多分辨率金字塔   
 grid_map_pyramid:
   bottom_resolution: 0.05
-  map_size:
-      x: 2048
-      y: 2048
+  map_size:    # 真实的物理尺寸  单位 m
+      x: 35
+      y: 35
   map_depth: 3 # 金子塔层数
 
 kalman_filter:   

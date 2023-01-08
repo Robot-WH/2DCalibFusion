@@ -26,17 +26,21 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //=================================================================================================
 
-#ifndef _LESSON4_GRIDMAPLOGODDS_h_
-#define _LESSON4_GRIDMAPLOGODDS_h_
+#pragma once 
 
 #include <cmath>
 
 /**
  * 栅格的对数置信度  
+ * @todo 垃圾实现   待删除   
  */
 class LogOddsCell
 {
 public:
+    LogOddsCell() {
+        logOddsVal = 0.0f;
+        updateIndex = -1;
+    }
     /**
    * Sets the cell value to val.
    * @param val The log odds value.
@@ -79,7 +83,7 @@ public:
     }
 
 public:
-    float logOddsVal; ///< The log odds representation of occupancy probability.
+    float logOddsVal;   ///< The log odds representation of occupancy probability.
     int updateIndex;
 };
 
@@ -93,15 +97,15 @@ public:
    */
     GridMapLogOddsFunctions() {
         // 设置free/占据 的栅格的对数概率 
-        this->setUpdateFreeFactor(0.4f);   // 空闲的更新量     -0.42
-        this->setUpdateOccupiedFactor(0.6f);   // 占据的更新量  0.41
+        setUpdateFreeFactor(0.4f);   // 空闲的更新量     -0.42
+        setUpdateOccupiedFactor(0.6f);   // 占据的更新量  0.41
     }
 
     /**
    * Update cell as occupied
    * @param cell The cell.
    */
-    void updateSetOccupied(LogOddsCell &cell) const {
+    void updateSetOccupied(LogOddsCell& cell) const {
         if (cell.logOddsVal < 50.0f) {
             cell.logOddsVal += logOddsOccupied;
         }
@@ -111,11 +115,11 @@ public:
    * Update cell as free
    * @param cell The cell.
    */
-    void updateSetFree(LogOddsCell &cell) const {
+    void updateSetFree(LogOddsCell& cell) const {
         cell.logOddsVal += logOddsFree;
     }
 
-    void updateUnsetFree(LogOddsCell &cell) const {
+    void updateUnsetFree(LogOddsCell& cell) const {
         cell.logOddsVal -= logOddsFree;
     }
 
@@ -124,7 +128,7 @@ public:
    * @param cell The cell.
    * @return The probability
    */
-    float getGridProbability(const LogOddsCell &cell) const {
+    float getGridProbability(const LogOddsCell& cell) const {
         float odds = exp(cell.logOddsVal);
         return odds / (odds + 1.0f);
     }
@@ -150,5 +154,3 @@ protected:
     float logOddsOccupied; /// < The log odds representation of probability used for updating cells as occupied
     float logOddsFree;     /// < The log odds representation of probability used for updating cells as free
 };
-
-#endif

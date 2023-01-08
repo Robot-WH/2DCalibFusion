@@ -25,8 +25,6 @@
 #include "../../FrontEnd2D/include/Estimator/estimator.hpp"
 #include "../../FrontEnd2D/include/Sensor/LaserPointContainer.h"
 #include "../../FrontEnd2D/include/Sensor/SensorData.hpp"
-#include "../../FrontEnd2D/include/util/MapLockerInterface.h"
-#include "../../FrontEnd2D/include/util/HectorMapMutex.h"
 #include "../../FrontEnd2D/include/util/DataDispatcher.hpp"
 #include "ros_util.h"
 
@@ -52,12 +50,15 @@ public:
     void lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 1>& ext);
     void wheelOdomDeadReckoningCallback(const TimedPose2d& pose);
     void undistortedPointcloudCallback(const hectorslam::LaserPointCloud::Ptr& data);
+    void dynamicPointsCallback(const std::pair<std::vector<hectorslam::LaserPoint>, double>& data);
+    void stablePointsCallback(const std::pair<std::vector<hectorslam::LaserPoint>, double>& data);
     void publishMapLoop(double p_map_pub_period_);
 
 private:
     void InitParams();
     void setMapInfo(nav_msgs::GetMap::Response &map_, const hectorslam::GridMap &gridMap);
-    void publishMap(MapPublisherContainer &map_, const hectorslam::GridMap &gridMap, ros::Time timestamp, MapLockerInterface *mapMutex = 0);
+    void publishMap(MapPublisherContainer &map_, const hectorslam::GridMap &gridMap, 
+        ros::Time timestamp, std::mutex* mapMutex);
     void publishTFLoop(double pub_period);
     bool rosPointCloudToDataContainer(const sensor_msgs::LaserScan &scan_msg, 
                                                                                 hectorslam::LaserPointCloud& pointCloud);
@@ -79,6 +80,8 @@ private:
     ros::Publisher odometryPublisher_;
     ros::Publisher wheelOdomDeadReckoningPublisher_;
     ros::Publisher undistorted_pointcloud_publisher_;    // 去畸变的点云
+    ros::Publisher dynamic_pointcloud_publisher_;    // 动态点云
+    ros::Publisher stable_pointcloud_publisher_;    // 稳定点云
 
     std::vector<MapPublisherContainer> mapPubContainer;
 

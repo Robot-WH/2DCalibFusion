@@ -14,7 +14,7 @@
     <param name="ConfigPath" value="$(find calib_fusion_2d)/config/param.yaml" />
 
     <!-- 启动 hector_slam  -->
-    <node pkg="calib_fusion_2d" type="calib_fusion_2d_hector_slam_node" name="calib_fusion_2d_hector_slam_node" output="screen">
+    <node pkg="calib_fusion_2d" type="slam2d_node" name="slam2d_node" output="screen">
         <param name="pub_map_baselink_tf" value="true"/>
         <param name="pub_map_odom_tf" value="true"/>
         <param name="pub_odometry_topic" value="true"/>

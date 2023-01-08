@@ -6,7 +6,7 @@
 #include "../../../../util/UtilFunctions.h"
 #include "../../../../Map/GridMap.h"
 #include "../../../../Map/GridMapCacheArray.h"
-#include "../../../../Estimator/MapRepMultiMap.h"
+#include "../../../../Estimator/GridMapPyramid.hpp"
 
 namespace hectorslam {
 
@@ -37,10 +37,10 @@ public:
      */
     virtual Eigen::Vector3f Solve(const Eigen::Vector3f& beginEstimateWorld, 
                                                                 const std::vector<LaserPointContainer>& dataContainers, 
-                                                                MapRepMultiMap& map, 
+                                                                GridMapPyramid& map, 
                                                                 Eigen::Matrix3f& covMatrix) {
         // std::cout << "hectorScanMatcher::solve" <<std::endl;
-        size_t size = map.GetMapLevels();
+        size_t size = map.getMapLevels();
         Eigen::Vector3f tmp(beginEstimateWorld);
         /// coarse to fine 的pose求精过程，i层的求解结果作为i-1层的求解初始值。
         for (int index = size - 1; index >= 0; --index) {

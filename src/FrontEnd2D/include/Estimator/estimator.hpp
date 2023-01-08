@@ -5,24 +5,23 @@
 #include "Kalman/ekf_estimator.hpp"
 #include "Initialize/2d_imu_initialize.hpp"
 #include "motionModel.hpp"
+#include "Calibration/2d_handeye_calibration.hpp"
+#include "../Map/TimedSlidingLocalMap.hpp"
 #include "../Map/GridMap.h"
 #include "../Map/OccGridMapUtilConfig.h"
 #include "../Sensor/LaserPointContainer.h"
 #include "../Sensor/SensorData.hpp"
 #include "../Lib/Algorithm/Pointcloud/laserUndistorted.hpp"
-#include "../Lib/Algorithm/Calibration/2d_handeye_calibration.hpp"
 #include "../Lib/Algorithm/Pointcloud/ScanMatcher/hectorScanMatcher.hpp"
 #include "../Lib/Algorithm/Pointcloud/ScanMatcher/imls_icp.h"
 
 #include "../util/UtilFunctions.h"
-#include "../util/MapLockerInterface.h"
 #include "../util/DataDispatcher.hpp"
 #include "../util/utility.hpp"
 #include "../Type/color.hpp"
 #include "../Type/Pose2d.hpp"
 
-#include "MapRepresentationInterface.h"
-#include "MapRepMultiMap.h"
+#include "GridMapPyramid.hpp"
 #include "../tic_toc.h"
 
 #include <float.h>
@@ -33,20 +32,22 @@ public:
     FrontEndEstimator(const std::string& config_path) {
         YAML::Node yaml = YAML::LoadFile(config_path);
         /* 构建初始地图 */
-        MapRepMultiMap::Option grid_map_pyramid_option;
-        grid_map_pyramid_option.bottomResolution = 
+        GridMapPyramid::Option grid_map_pyramid_option;
+        grid_map_pyramid_option.bottom_resolution = 
             yaml["grid_map_pyramid"]["bottom_resolution"].as<float>();
-        grid_map_pyramid_option.numDepth = 
+        grid_map_pyramid_option.num_depth = 
             yaml["grid_map_pyramid"]["map_depth"].as<float>();
-        grid_map_pyramid_option.mapSizeX = 
-            yaml["grid_map_pyramid"]["map_size"]["x"].as<float>();
-        grid_map_pyramid_option.mapSizeY = 
-            yaml["grid_map_pyramid"]["map_size"]["y"].as<float>();
+        grid_map_pyramid_option.map_sizeX = 
+            yaml["grid_map_pyramid"]["map_size"]["x"].as<float>();   // 真实的物理尺寸  单位 m
+        grid_map_pyramid_option.map_sizeY = 
+            yaml["grid_map_pyramid"]["map_size"]["y"].as<float>();   // 真实的物理尺寸  单位 m
+        grid_map_pyramid_option.min_distance_to_boundary = 
+            yaml["sensor"]["laser"]["valid_distance"].as<float>();
 
-        mapRep = new MapRepMultiMap(grid_map_pyramid_option);
+        grid_map_pyramid_ = new GridMapPyramid(grid_map_pyramid_option);
         hectorScanMatcher::Option option; 
         hector_matcher_ = new hectorScanMatcher(option);
-        dataContainers.resize(mapRep->GetMapLevels());
+        laser_pyramid_container_.resize(grid_map_pyramid_->getMapLevels());
         this->reset();
         /* 设置进行地图更新的位姿变化阈值 **/
         this->SetMapUpdateMinDistDiff(0.4f * 1.0f);
@@ -82,7 +83,7 @@ public:
     }
 
     ~FrontEndEstimator() {
-        delete mapRep;
+        delete grid_map_pyramid_;
     }
 
     void InputLaser(LaserPointCloud::ptr& laser_ptr) {
@@ -122,21 +123,19 @@ public:
     }
 
     // 设置概率、距离阈值参数
-    void SetUpdateFactorFree(float free_factor) { mapRep->setUpdateFactorFree(free_factor); };
-    void SetUpdateFactorOccupied(float occupied_factor) { mapRep->setUpdateFactorOccupied(occupied_factor); };
+    void SetUpdateFactorFree(float free_factor) { grid_map_pyramid_->setUpdateFactorFree(free_factor); };
+    void SetUpdateFactorOccupied(float occupied_factor) { grid_map_pyramid_->setUpdateFactorOccupied(occupied_factor); };
     void SetMapUpdateMinDistDiff(float minDist) { paramMinDistanceDiffForMapUpdate = minDist; };
     void SetMapUpdateMinAngleDiff(float angleChange) { paramMinAngleDiffForMapUpdate = angleChange; };
 
     // 获取地图层数
-    int GetMapLevels() const { return mapRep->GetMapLevels(); };
+    int GetMapLevels() const { return grid_map_pyramid_->getMapLevels(); };
     // 上一次匹配到的位姿
     const TimedPose2d& GetLastFusionPose() { return last_fusionOdom_pose_; };
-    // 给指定图层添加互斥锁
-    void AddMapMutex(int i, MapLockerInterface *mapMutex) { mapRep->addMapMutex(i, mapMutex); };
     // 获取指定图层地图的常量引用
-    const GridMap& GetGridMap(int mapLevel = 0) const { return mapRep->getGridMap(mapLevel); };
+    const GridMap& GetGridMap(int mapLevel = 0) const { return grid_map_pyramid_->getGridMap(mapLevel); };
     // 获取指定图层的锁
-    MapLockerInterface* GetMapMutex(int i) { return mapRep->getMapMutex(i); };
+    std::mutex* GetMapMutex(int i) { return grid_map_pyramid_->getMapMutex(i); };
     // 上一次匹配的协方差
     const Eigen::Matrix3f& GetLastScanMatchCovariance() const { return lastScanMatchCov; };
 protected:
@@ -237,25 +236,40 @@ protected:
                     // 去除laser的畸变
                     LaserUndistorted(curr_laser_ptr, diff_model.GetPath());
                     // 发布去畸变后的点云
-                    util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", curr_laser_ptr); 
+                    // util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", curr_laser_ptr); 
                     Pose2d predict_odom_pose = last_fusionOdom_pose_.pose_ * predict_incre_pose;   // To<-last * Tlast<-curr
                     last_predictOdom_pose_.pose_ = last_predictOdom_pose_.pose_ * predict_incre_pose;
                     last_predictOdom_pose_.time_stamp_ = curr_laser_ptr->end_time_; 
                     // 发布轮速运动解算结果
                     util::DataDispatcher::GetInstance().Publish("WheelDeadReckoning", last_predictOdom_pose_); 
-                    // std::cout << "odom predict: " << predict_odom_pose.vec().transpose() << std::endl;
-                    // 将点云数据转换为栅格金字塔数据
-                    getGridPyramidData(*curr_laser_ptr);  
-                    // tt.toc("getGridPyramidData");
-                    // tt.tic();
                     // 将odom系下的预测位姿转换到laser odom下
                     Pose2d new_estimate_laserOdom_pose;
                     poseOdomToPrimeLaserOdom(predict_odom_pose, new_estimate_laserOdom_pose);
+                    // 利用栅格金子塔进行动态点云检测以及预测准确性检测
+                    std::pair<std::vector<LaserPoint>, double> dynamic_points_data;    // 动态点
+                    std::pair<std::vector<LaserPoint>, double>  stable_points_data;   // 静态点 
+                    dynamic_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());
+                    dynamic_points_data.second = curr_laser_ptr->end_time_; 
+                    stable_points_data.first.reserve(curr_laser_ptr->pointcloud_.size() * 0.2);  
+                    stable_points_data.second = curr_laser_ptr->end_time_; 
+                    movingTargetDetect(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(2), 
+                        dynamic_points_data.first, stable_points_data.first);
+                    util::DataDispatcher::GetInstance().Publish("dynamic_pointcloud", dynamic_points_data); 
+                    util::DataDispatcher::GetInstance().Publish("stable_pointcloud", stable_points_data); 
+                    // 如果动态点的数量大于稳定点的数量 认为运动预测不准(里程计打滑)，此时改为匀速运动学模型去除畸变和预测
+                    if (dynamic_points_data.first.size() > stable_points_data.first.size()) {
+                    }
+                    // std::cout << "odom predict: " << predict_odom_pose.vec().transpose() << std::endl;
+                    // 将点云数据转换为激光多分辨率金字塔数据
+                    getLaserPyramidData(*curr_laser_ptr);  
+                    // tt.toc("getGridPyramidData");
+                    TicToc tt; 
+                    //movingTargetDetect(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->GetGridMap(2));
                     new_estimate_laserOdom_pose.SetVec(hector_matcher_->Solve(new_estimate_laserOdom_pose.vec(), 
-                        dataContainers, *mapRep, lastScanMatchCov)); 
+                        laser_pyramid_container_, *grid_map_pyramid_, lastScanMatchCov)); 
                     // 细匹配  ICP / NDT 
 
-                    // tt.toc("match solve");
+                    tt.toc("match solve");
                     // tt.tic();
                     // 将pose转换到odom系下
                     Pose2d new_estimate_odom_pose; 
@@ -289,8 +303,8 @@ protected:
                     if (util::poseDifferenceLargerThan(new_estimate_laserOdom_pose.vec(), last_map_updata_pose_.vec(), 
                             paramMinDistanceDiffForMapUpdate, paramMinAngleDiffForMapUpdate)) { 
                         // 仅在位姿变化大于阈值 或者 map_without_matching为真 的时候进行地图更新
-                        mapRep->updateByScan(dataContainers, new_estimate_laserOdom_pose.vec());
-                        mapRep->onMapUpdated();
+                        grid_map_pyramid_->updateByScan(laser_pyramid_container_, new_estimate_laserOdom_pose.vec());
+                        grid_map_pyramid_->onMapUpdated();
                         last_map_updata_pose_ = new_estimate_laserOdom_pose;
                     }
 
@@ -304,6 +318,28 @@ protected:
             }
             
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+    }
+
+    /**
+     * @brief: 动态目标点云检测
+     * @param pose 当前laser 在 laserOdom系下的位姿  
+     * @return {*}
+     */    
+    void movingTargetDetect(const LaserPointCloud::Ptr& laser_ptr, 
+                                                            const Pose2d& pose, 
+                                                            const GridMap& occGridMap,
+                                                            std::vector<LaserPoint>& dynamic_points,
+                                                            std::vector<LaserPoint>& stable_points) {
+        for (auto& point : laser_ptr->pointcloud_) {
+            Eigen::Vector2f point_laserOdom_pos = pose * point.pos_;     
+            Eigen::Vector2f point_gridmap_pos = occGridMap.getMapCoords(point_laserOdom_pos);     // laserOdom -> map
+            // 如果当前的激光点击中的占据栅格是空的，说明这是动态点或者不稳定点
+            if (occGridMap.isFree(round(point_gridmap_pos[0]), round(point_gridmap_pos[1]))) {
+                dynamic_points.push_back(point);  
+            } else {
+                stable_points.push_back(point);  
+            }
         }
     }
 
@@ -469,39 +505,41 @@ protected:
         last_map_updata_pose_.SetVec(Eigen::Vector3f(FLT_MAX, FLT_MAX, FLT_MAX));
         last_fusionOdom_pose_.pose_.SetVec(Eigen::Vector3f::Zero());
         //重置地图
-        mapRep->reset();
+        grid_map_pyramid_->reset();
     }
 
     /**
      * @brief: 将当前的输入点云 转换成2D栅格金字塔数据 
+     * @details: 转换的结果是多分辨率金字塔激光laser_pyramid_container_，由于对于点云匹配任务，
+     *                      需要激光点在多分辨率栅格地图的具体位置，因此这里生成的多分辨率激光需要是浮点型的
      * @param pointcloud 输入点云，若有多激光的话，
      *                                            将其他激光的数据变换到主激光坐标系下再合成为一组数据。
      *                                             实际观测位置和该点云坐标原点重和  
      * @return {*}
      */    
-    void getGridPyramidData(const LaserPointCloud &pointcloud) {
+    void getLaserPyramidData(const LaserPointCloud& pointcloud) {
         // 第一层
-        dataContainers[0].clear(); 
+        laser_pyramid_container_[0].clear(); 
         uint16_t num = pointcloud.pointcloud_.size(); 
         // std::cout << "getGridPyramidData size: " << num << std::endl;
         for (uint16_t i = 0; i < num; ++i) {
-            dataContainers[0].add(pointcloud.pointcloud_[i].pos_ * getScaleToMap());    // 四舍五入   原点在grid中心  
+            laser_pyramid_container_[0].add(pointcloud.pointcloud_[i].pos_ * getScaleToMap());  
         }
         // 其他层  
-        size_t size = mapRep->GetMapLevels();
+        size_t size = grid_map_pyramid_->getMapLevels();
         for (int index = size - 1; index > 0; --index) {
             // 根据第0层地图层数，求取了在index层激光的数据
-            dataContainers[index].setFrom(dataContainers[0], static_cast<float>(1.0 / pow(2.0, static_cast<double>(index))));
+            laser_pyramid_container_[index].setFrom(laser_pyramid_container_[0], static_cast<float>(1.0 / pow(2.0, static_cast<double>(index))));
         }
     }
 
-    float getScaleToMap() const { return mapRep->getScaleToMap(); };    // 返回第 0层的scale  
+    float getScaleToMap() const { return grid_map_pyramid_->getScaleToMap(); };    // 返回第 0层的scale  
 
 private:
 
-    MapRepMultiMap* mapRep; // 地图接口对象--纯虚类进行
+    GridMapPyramid* grid_map_pyramid_; // 地图接口对象--纯虚类进行
     hectorScanMatcher* hector_matcher_;
-    std::vector<LaserPointContainer> dataContainers;  /// 不同图层对应的激光数据
+    std::vector<LaserPointContainer> laser_pyramid_container_;  /// 不同图层对应的激光数据
     
     bool prime_laser_upside_down_; // 主雷达颠倒 
     bool ekf_estimate_enable_ = true;    // 默认使用ekf估计  

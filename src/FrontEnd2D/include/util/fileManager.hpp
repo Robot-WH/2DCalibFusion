@@ -1,4 +1,3 @@
-
 #ifndef _FILE_MANAGER_HPP_
 #define _FILE_MANAGER_HPP_
 
@@ -12,8 +11,8 @@ public:
   static bool CreateFile(std::ofstream& ofs, std::string file_path) {
     ofs.close();
     boost::filesystem::remove(file_path.c_str());
-
     ofs.open(file_path.c_str(), std::ios::out);
+
     if (!ofs) {
         // LOG(WARNING) << "无法生成文件: " << std::endl << file_path << std::endl << std::endl;
         std::cout<<" 无法生成文件: "<< file_path << std::endl;
@@ -63,6 +62,4 @@ public:
       return true;
   }
 };  // class FileManager
-
-
 #endif
