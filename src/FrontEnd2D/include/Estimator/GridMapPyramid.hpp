@@ -122,16 +122,19 @@ public:
      */
     void updateByScan(const std::vector<LaserPointContainer>& data_containers, 
                                                             const Eigen::Vector3f &laser_pose_in_world) {
+        // std::cout << "isCloseToBoundary()" << std::endl;
         // 判断地图是否需要移动
         if (isCloseToBoundary(laser_pose_in_world)) {
-            // std::cout << common::GREEN << "进入submap边界，submap进行移动" << common::RESET << std::endl;
+            std::cout << common::GREEN << "进入submap边界，submap进行移动" << common::RESET << std::endl;
             // 计算map移动后原点的世界坐标
             // map的中点移动到当前laser处
             Eigen::Vector2f new_map_pos_in_world{laser_pose_in_world[0] - option_.map_sizeX * 0.5f,
                                                                                                   laser_pose_in_world[1] - option_.map_sizeY * 0.5f}; 
             // 移动地图金字塔
             moveTo(new_map_pos_in_world); 
+            map_in_world_ = new_map_pos_in_world;
         } 
+        // std::cout << "isCloseToBoundary() done" << std::endl;
         unsigned int size = data_containers.size();
         for (unsigned int i = 0; i < size; ++i) {
             mapOperateContainer_[i].updateByScan(data_containers[i].dataPoints, laser_pose_in_world);
@@ -144,7 +147,7 @@ public:
      * @param {Vector3f} &laser_pose_in_world
      * @return {*}
      */    
-    bool isCloseToBoundary(const Eigen::Vector3f &laser_pose_in_world) {
+    bool isCloseToBoundary(const Eigen::Vector3f& laser_pose_in_world) {
         Eigen::Vector2f laser_ref_map = {laser_pose_in_world[0] - map_in_world_[0], 
                                                                             laser_pose_in_world[1] - map_in_world_[1]};  
         if (laser_ref_map[0] < option_.min_distance_to_boundary || 

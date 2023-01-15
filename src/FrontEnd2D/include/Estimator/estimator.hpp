@@ -149,10 +149,8 @@ protected:
         bool wheel_used_ = false;  
         std::deque<WheelOdom> wheel_odom_selected; 
         std::deque<ImuData> imu_selected;  
-
         while (1) {
             std::shared_lock<std::shared_mutex> s_l(laser_sm_);   // 读锁
-            
             if (laser_cache_.size()) {
                 auto& curr_laser_ptr = laser_cache_.front();   // 之前的push_back并不会使该引用失效
                 s_l.unlock(); 
@@ -168,7 +166,6 @@ protected:
                             std::cout << common:: RED << "---------------------wheel data loss !-----------------------" 
                             << common::RESET << std::endl; 
                         }
-
                         if (!imu_cache_.empty() &&
                                  imu_cache_.back().time_stamp_ < curr_laser_ptr->end_time_) {
                             imu_cache_.clear();  
@@ -176,7 +173,6 @@ protected:
                             << common::RESET << std::endl; 
                         }
                     }
-
                     wait_time = 0; 
                     // 进行EKF预测   
                     // laser-imu-wheel模式： imu预测+laser&wheel校正
@@ -241,30 +237,18 @@ protected:
                     last_predictOdom_pose_.pose_ = last_predictOdom_pose_.pose_ * predict_incre_pose;
                     last_predictOdom_pose_.time_stamp_ = curr_laser_ptr->end_time_; 
                     // 发布轮速运动解算结果
-                    util::DataDispatcher::GetInstance().Publish("WheelDeadReckoning", last_predictOdom_pose_); 
+                    // util::DataDispatcher::GetInstance().Publish("WheelDeadReckoning", last_predictOdom_pose_); 
                     // 将odom系下的预测位姿转换到laser odom下
                     Pose2d new_estimate_laserOdom_pose;
                     poseOdomToPrimeLaserOdom(predict_odom_pose, new_estimate_laserOdom_pose);
-                    // 利用栅格金子塔进行动态点云检测以及预测准确性检测
-                    std::pair<std::vector<LaserPoint>, double> dynamic_points_data;    // 动态点
-                    std::pair<std::vector<LaserPoint>, double>  stable_points_data;   // 静态点 
-                    dynamic_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());
-                    dynamic_points_data.second = curr_laser_ptr->end_time_; 
-                    stable_points_data.first.reserve(curr_laser_ptr->pointcloud_.size() * 0.2);  
-                    stable_points_data.second = curr_laser_ptr->end_time_; 
-                    movingTargetDetect(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(2), 
-                        dynamic_points_data.first, stable_points_data.first);
-                    util::DataDispatcher::GetInstance().Publish("dynamic_pointcloud", dynamic_points_data); 
-                    util::DataDispatcher::GetInstance().Publish("stable_pointcloud", stable_points_data); 
-                    // 如果动态点的数量大于稳定点的数量 认为运动预测不准(里程计打滑)，此时改为匀速运动学模型去除畸变和预测
-                    if (dynamic_points_data.first.size() > stable_points_data.first.size()) {
-                    }
+                    // 基于栅格金字塔快速检测预测是否可靠，判断是否存在里程计打滑等现象
+                    // fastPredictFailureDetection(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(1)); 
                     // std::cout << "odom predict: " << predict_odom_pose.vec().transpose() << std::endl;
                     // 将点云数据转换为激光多分辨率金字塔数据
                     getLaserPyramidData(*curr_laser_ptr);  
                     // tt.toc("getGridPyramidData");
                     TicToc tt; 
-                    //movingTargetDetect(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->GetGridMap(2));
+                    //pointProjectionAndClassification(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->GetGridMap(2));
                     new_estimate_laserOdom_pose.SetVec(hector_matcher_->Solve(new_estimate_laserOdom_pose.vec(), 
                         laser_pyramid_container_, *grid_map_pyramid_, lastScanMatchCov)); 
                     // 细匹配  ICP / NDT 
@@ -287,6 +271,18 @@ protected:
                         // 更新对应laser坐标
                         poseOdomToPrimeLaserOdom(new_estimate_odom_pose, new_estimate_laserOdom_pose);
                     }
+                    // 利用栅格金子塔进行动态点云检测
+                    std::pair<std::vector<Eigen::Vector2f>, double> dynamic_points_data;    // 动态点
+                    std::pair<std::vector<Eigen::Vector2f>, double>  stable_points_data;   // 静态点 
+                    std::pair<std::vector<Eigen::Vector2f>, double>  undetermined_points_data;  // 待定点
+                    dynamic_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());
+                    dynamic_points_data.second = curr_laser_ptr->end_time_; 
+                    stable_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());  
+                    stable_points_data.second = curr_laser_ptr->end_time_; 
+                    undetermined_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());  
+                    undetermined_points_data.second = curr_laser_ptr->end_time_; 
+                    pointProjectionAndClassification(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(2), 
+                        dynamic_points_data.first, stable_points_data.first, undetermined_points_data.first);
                     // 系统初始化是指 联合imu和wheel的多传感器初始化
                     // 系统初始化只要有imu或wheel两者之一就可以，系统初始化后，
                     // 即使之后出现新的传感器数据，也不会重新初始化
@@ -297,16 +293,20 @@ protected:
                     last_fusionOdom_pose_.pose_ = new_estimate_odom_pose;
                     last_fusionOdom_pose_.time_stamp_ = curr_laser_ptr->end_time_; 
                     // std::cout << "odom correct : " << new_estimate_odom_pose.vec().transpose() << std::endl;
-                    // 发布融合里程计的结果
-                    util::DataDispatcher::GetInstance().Publish("fusionOdom", last_fusionOdom_pose_); 
                     /** 2.地图更新(last_map_updata_pose_初始化为一个很大的值，因此第一帧点云就会更新地图) **/
                     if (util::poseDifferenceLargerThan(new_estimate_laserOdom_pose.vec(), last_map_updata_pose_.vec(), 
                             paramMinDistanceDiffForMapUpdate, paramMinAngleDiffForMapUpdate)) { 
                         // 仅在位姿变化大于阈值 或者 map_without_matching为真 的时候进行地图更新
                         grid_map_pyramid_->updateByScan(laser_pyramid_container_, new_estimate_laserOdom_pose.vec());
                         grid_map_pyramid_->onMapUpdated();
+                        local_map_.UpdateLocalMapForMotion(curr_laser_ptr->pointcloud_);
                         last_map_updata_pose_ = new_estimate_laserOdom_pose;
                     }
+                    // 发布数据
+                    util::DataDispatcher::GetInstance().Publish("fusionOdom", last_fusionOdom_pose_); 
+                    util::DataDispatcher::GetInstance().Publish("dynamic_pointcloud", dynamic_points_data); 
+                    util::DataDispatcher::GetInstance().Publish("stable_pointcloud", stable_points_data); 
+                    util::DataDispatcher::GetInstance().Publish("local_map", local_map_.ReadLocalMap()); 
 
                     laser_sm_.lock();
                     laser_cache_.pop_front();  
@@ -322,23 +322,82 @@ protected:
     }
 
     /**
-     * @brief: 动态目标点云检测
-     * @param pose 当前laser 在 laserOdom系下的位姿  
+     * @brief: 快速预测失效检测
+     * @details: 主要用于检测如轮子打滑，碰撞等预测失效的情况
+     *                      具体算法：在当前激光点中，按照角度分布均匀抽取100个点进行检测，
+     *                                              将这些点按照预测位姿投影到低分辨率(>10cm)的占据栅格中，计算占据/未占据的比率，
+     *                                              若该比值过小，认为预测pose有误
+     * @param laser_ptr 激光点云 已经去除畸变
+     * @param pose 预测的位姿
+     * @param occGridMap 栅格工具  
      * @return {*}
      */    
-    void movingTargetDetect(const LaserPointCloud::Ptr& laser_ptr, 
+    bool fastPredictFailureDetection(const LaserPointCloud::Ptr& laser_ptr, 
+                                                            const Pose2d& pose, 
+                                                            const GridMap& occGridMap) {
+        uint16_t laser_num = laser_ptr->pointcloud_.size();
+        float incre_step = 1.0;
+        if (laser_num > 100) {
+            incre_step = laser_num * 0.01;  
+        } 
+        // std::cout << "incre_step: " << incre_step << "laser_num: " << laser_num << std::endl;
+        uint16_t unknow_point_num = 0;
+        uint16_t inlier_point_num = 0;
+        uint16_t outlier_point_num = 0;
+
+        for (float curr_point = 0; curr_point < laser_num - 1; curr_point += incre_step ) {
+            Eigen::Vector2f point_laserOdom_pos = pose * laser_ptr->pointcloud_[int(curr_point)].pos_;     
+            Eigen::Vector2f point_gridmap_pos = occGridMap.getMapCoords(point_laserOdom_pos);     // laserOdom -> map
+
+            if (!occGridMap.pointOutOfMapBounds(point_gridmap_pos)) {
+                if (occGridMap.isOccupied(round(point_gridmap_pos[0]), round(point_gridmap_pos[1]))) {
+                    inlier_point_num++;
+                } else if (occGridMap.isFree(round(point_gridmap_pos[0]), round(point_gridmap_pos[1]))) {
+                    outlier_point_num++;
+                } else {
+                    unknow_point_num++;
+                }
+            }
+        }
+
+        std::cout << common::YELLOW << "unknow_point_num: " << unknow_point_num << std::endl;
+        std::cout << common::YELLOW << "inlier_point_num: " << inlier_point_num << std::endl;
+        std::cout << common::YELLOW << "outlier_point_num: " << outlier_point_num << std::endl;
+        return false; 
+    }
+
+    /**
+     * @brief: 激光点投影到世界坐标并且进行状态分类
+     * @details 将点分为 ：动态点、稳定点、待定点 
+     * @param pose 当前laser 在 laserOdom系下的位姿  
+     * @param[out] dynamic_points 动态点   即击中空白栅格 且空白栅格的占据概率低与阈值
+     * @param[out] stable_points 稳定点   即击中占据栅格
+     * @param[out] undetermined_points 待定点  即击中未知栅格以及击中占据概率高与阈值的空白栅格的点
+     * @return {*}
+     */    
+    void pointProjectionAndClassification(const LaserPointCloud::Ptr& laser_ptr, 
                                                             const Pose2d& pose, 
                                                             const GridMap& occGridMap,
-                                                            std::vector<LaserPoint>& dynamic_points,
-                                                            std::vector<LaserPoint>& stable_points) {
+                                                            std::vector<Eigen::Vector2f>& dynamic_points,
+                                                            std::vector<Eigen::Vector2f>& stable_points,
+                                                            std::vector<Eigen::Vector2f>& undetermined_points) {
         for (auto& point : laser_ptr->pointcloud_) {
-            Eigen::Vector2f point_laserOdom_pos = pose * point.pos_;     
-            Eigen::Vector2f point_gridmap_pos = occGridMap.getMapCoords(point_laserOdom_pos);     // laserOdom -> map
+            point.pos_ = pose * point.pos_;      //  转到laserOdom系 
+            Eigen::Vector2f point_gridmap_pos = occGridMap.getMapCoords(point.pos_);     // laserOdom -> map
+            // 超过范围的点一律丢掉
+            if (occGridMap.pointOutOfMapBounds(point_gridmap_pos)) {
+                continue;      
+            }
             // 如果当前的激光点击中的占据栅格是空的，说明这是动态点或者不稳定点
-            if (occGridMap.isFree(round(point_gridmap_pos[0]), round(point_gridmap_pos[1]))) {
-                dynamic_points.push_back(point);  
+            // if (occGridMap.isFree(round(point_gridmap_pos[0]), round(point_gridmap_pos[1]))) {
+            //     dynamic_points.push_back(point);  
+            // } 
+            if (occGridMap.isOccupied(round(point_gridmap_pos[0]), round(point_gridmap_pos[1]))) {
+                stable_points.push_back(point.pos_);     // 在一定距离内  且静态的点叫稳定点
+            } else if (occGridMap.isFree(round(point_gridmap_pos[0]), round(point_gridmap_pos[1]))) {
+                dynamic_points.push_back(point.pos_);  
             } else {
-                stable_points.push_back(point);  
+                undetermined_points.push_back(point.pos_);  
             }
         }
     }
@@ -538,6 +597,7 @@ protected:
 private:
 
     GridMapPyramid* grid_map_pyramid_; // 地图接口对象--纯虚类进行
+    PointcloudLocalMap local_map_;  
     hectorScanMatcher* hector_matcher_;
     std::vector<LaserPointContainer> laser_pyramid_container_;  /// 不同图层对应的激光数据
     

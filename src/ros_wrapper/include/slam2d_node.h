@@ -50,8 +50,10 @@ public:
     void lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 1>& ext);
     void wheelOdomDeadReckoningCallback(const TimedPose2d& pose);
     void undistortedPointcloudCallback(const hectorslam::LaserPointCloud::Ptr& data);
-    void dynamicPointsCallback(const std::pair<std::vector<hectorslam::LaserPoint>, double>& data);
-    void stablePointsCallback(const std::pair<std::vector<hectorslam::LaserPoint>, double>& data);
+    void dynamicPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
+    void stablePointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
+    void undeterminedPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
+    void localMapCallback(const std::vector<hectorslam::LaserPoint>& data);
     void publishMapLoop(double p_map_pub_period_);
 
 private:
@@ -82,6 +84,7 @@ private:
     ros::Publisher undistorted_pointcloud_publisher_;    // 去畸变的点云
     ros::Publisher dynamic_pointcloud_publisher_;    // 动态点云
     ros::Publisher stable_pointcloud_publisher_;    // 稳定点云
+    ros::Publisher localmap_publisher_;
 
     std::vector<MapPublisherContainer> mapPubContainer;
 

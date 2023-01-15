@@ -112,6 +112,11 @@ public:
             || (coords[1] < 0) || (coords[1] > (map_info_.map_grid_size.y() - 1)));
     }
 
+    bool pointOutOfMapBounds(const uint16_t& x, const uint16_t& y) const {
+        return ((x < 0) || (x > (map_info_.map_grid_size.x() - 1)) 
+            || (y < 0) || (y > (map_info_.map_grid_size.y() - 1)));
+    }
+
     /**
      * Resets the grid cell values by using the resetGridCell() function.
      */
@@ -143,6 +148,14 @@ public:
     void resetArray(_CellType* new_mapArray) {
         delete[] mapArray_;
         mapArray_ = new_mapArray; 
+    }
+
+    bool getCell(int x, int y, _CellType& cell) {
+        if (pointOutOfMapBounds(x, y)) {
+            return false;
+        }
+        cell = mapArray_[y * sizeX_ + x];
+        return true; 
     }
 
     _CellType& getCell(int x, int y) {
@@ -217,9 +230,9 @@ public:
     }
 
     /**
- * Returns the cell edge length of grid cells in millimeters.
- * @return the cell edge length in millimeters.
- */
+     * Returns the cell edge length of grid cells in millimeters.
+     * @return the cell edge length in millimeters.
+     */
     float getCellLength() const {
         return map_info_.grid_resolution;
     }

@@ -12,8 +12,8 @@ extrinsic:
 grid_map_pyramid:
   bottom_resolution: 0.05
   map_size:    # 真实的物理尺寸  单位 m
-      x: 35
-      y: 35
+      x: 40
+      y: 40
   map_depth: 3 # 金子塔层数
 
 kalman_filter:   

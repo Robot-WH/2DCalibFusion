@@ -8,15 +8,15 @@
     <param name="use_sim_time" value="true" />
 
     <!-- base_link to front_laser_link -->
-    <node pkg="tf" type="static_transform_publisher" name="link_broadcaster" 
-        args="0 0 0 0 0 3.1415926 base_link front_laser_link 50" />
+    <!-- <node pkg="tf" type="static_transform_publisher" name="link_broadcaster" 
+        args="0 0 0 0 0 3.1415926 base_link front_laser_link 50" /> -->
 
     <param name="ConfigPath" value="$(find calib_fusion_2d)/config/param.yaml" />
 
     <!-- 启动 hector_slam  -->
     <node pkg="calib_fusion_2d" type="slam2d_node" name="slam2d_node" output="screen">
-        <param name="pub_map_baselink_tf" value="true"/>
-        <param name="pub_map_odom_tf" value="true"/>
+        <param name="pub_map_baselink_tf" value="false"/>
+        <param name="pub_map_odom_tf" value="false"/>
         <param name="pub_odometry_topic" value="true"/>
         <param name="tracking_frame" value="base_link"/>
 
@@ -33,7 +33,7 @@
         <param name="map_multi_res_levels" value="３"/>
 
         <param name="map_update_distance_thresh" value="0.4"/>
-        <param name="map_update_angle_thresh" value="0.9"/>
+        <param name="map_update_angle_thresh" value="0.78"/>
     </node>
     
     <!-- launch rviz -->
