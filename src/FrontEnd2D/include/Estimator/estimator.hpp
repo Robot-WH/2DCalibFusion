@@ -271,7 +271,7 @@ protected:
                         // 更新对应laser坐标
                         poseOdomToPrimeLaserOdom(new_estimate_odom_pose, new_estimate_laserOdom_pose);
                     }
-                    // 利用栅格金子塔进行动态点云检测
+                    // 利用栅格金子塔进行点云分类
                     std::pair<std::vector<Eigen::Vector2f>, double> dynamic_points_data;    // 动态点
                     std::pair<std::vector<Eigen::Vector2f>, double>  stable_points_data;   // 静态点 
                     std::pair<std::vector<Eigen::Vector2f>, double>  undetermined_points_data;  // 待定点
@@ -281,7 +281,8 @@ protected:
                     stable_points_data.second = curr_laser_ptr->end_time_; 
                     undetermined_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());  
                     undetermined_points_data.second = curr_laser_ptr->end_time_; 
-                    pointProjectionAndClassification(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(2), 
+                    pointProjection(curr_laser_ptr, new_estimate_laserOdom_pose);
+                    pointClassification(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(2), 
                         dynamic_points_data.first, stable_points_data.first, undetermined_points_data.first);
                     // 系统初始化是指 联合imu和wheel的多传感器初始化
                     // 系统初始化只要有imu或wheel两者之一就可以，系统初始化后，
@@ -299,7 +300,7 @@ protected:
                         // 仅在位姿变化大于阈值 或者 map_without_matching为真 的时候进行地图更新
                         grid_map_pyramid_->updateByScan(laser_pyramid_container_, new_estimate_laserOdom_pose.vec());
                         grid_map_pyramid_->onMapUpdated();
-                        local_map_.UpdateLocalMapForMotion(curr_laser_ptr->pointcloud_);
+                        local_map_.UpdateLocalMapForMotion(stable_points_data.first);
                         last_map_updata_pose_ = new_estimate_laserOdom_pose;
                     }
                     // 发布数据
@@ -367,35 +368,51 @@ protected:
     }
 
     /**
-     * @brief: 激光点投影到世界坐标并且进行状态分类
+     * @brief: 激光点投影到世界坐标
+     */    
+    void pointProjection(const LaserPointCloud::Ptr& laser_ptr, const Pose2d& pose) {
+        for (auto& point : laser_ptr->pointcloud_) {
+            point.pos_ = pose * point.pos_;      //  转到laserOdom系 
+        }
+    }
+
+    /**
+     * @brief: 激光点分类
      * @details 将点分为 ：动态点、稳定点、待定点 
+     * @param laser_ptr 转到了地图坐标系的激光点 
      * @param pose 当前laser 在 laserOdom系下的位姿  
      * @param[out] dynamic_points 动态点   即击中空白栅格 且空白栅格的占据概率低与阈值
      * @param[out] stable_points 稳定点   即击中占据栅格
      * @param[out] undetermined_points 待定点  即击中未知栅格以及击中占据概率高与阈值的空白栅格的点
      * @return {*}
      */    
-    void pointProjectionAndClassification(const LaserPointCloud::Ptr& laser_ptr, 
+    void pointClassification(const LaserPointCloud::Ptr& laser_ptr, 
                                                             const Pose2d& pose, 
                                                             const GridMap& occGridMap,
                                                             std::vector<Eigen::Vector2f>& dynamic_points,
                                                             std::vector<Eigen::Vector2f>& stable_points,
                                                             std::vector<Eigen::Vector2f>& undetermined_points) {
         for (auto& point : laser_ptr->pointcloud_) {
-            point.pos_ = pose * point.pos_;      //  转到laserOdom系 
             Eigen::Vector2f point_gridmap_pos = occGridMap.getMapCoords(point.pos_);     // laserOdom -> map
             // 超过范围的点一律丢掉
             if (occGridMap.pointOutOfMapBounds(point_gridmap_pos)) {
                 continue;      
             }
-            // 如果当前的激光点击中的占据栅格是空的，说明这是动态点或者不稳定点
-            // if (occGridMap.isFree(round(point_gridmap_pos[0]), round(point_gridmap_pos[1]))) {
-            //     dynamic_points.push_back(point);  
-            // } 
-            if (occGridMap.isOccupied(round(point_gridmap_pos[0]), round(point_gridmap_pos[1]))) {
-                stable_points.push_back(point.pos_);     // 在一定距离内  且静态的点叫稳定点
-            } else if (occGridMap.isFree(round(point_gridmap_pos[0]), round(point_gridmap_pos[1]))) {
-                dynamic_points.push_back(point.pos_);  
+            uint16_t grid_x = round(point_gridmap_pos[0]);
+            uint16_t grid_y = round(point_gridmap_pos[1]); 
+
+            if (occGridMap.isFree(grid_x, grid_y)) {
+                if (occGridMap.isFree(grid_x + 1, grid_y) && 
+                      occGridMap.isFree(grid_x - 1, grid_y) && 
+                      occGridMap.isFree(grid_x, grid_y + 1) &&
+                      occGridMap.isFree(grid_x, grid_y - 1)) {
+                    // 检测该栅格前后左右四个方向，如果都为空，则该点是动态点，若至少有一个非空，则直接忽略
+                    dynamic_points.push_back(point.pos_);  
+                    continue;  
+                } 
+            } 
+            if (occGridMap.isOccupied(grid_x, grid_y)) {
+                stable_points.push_back(point.pos_);  // 在一定距离内  且静态的点叫稳定点
             } else {
                 undetermined_points.push_back(point.pos_);  
             }

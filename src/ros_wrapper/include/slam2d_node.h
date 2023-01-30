@@ -53,7 +53,7 @@ public:
     void dynamicPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
     void stablePointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
     void undeterminedPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
-    void localMapCallback(const std::vector<hectorslam::LaserPoint>& data);
+    void localMapCallback(const std::vector<Eigen::Vector2f>& data);
     void publishMapLoop(double p_map_pub_period_);
 
 private:

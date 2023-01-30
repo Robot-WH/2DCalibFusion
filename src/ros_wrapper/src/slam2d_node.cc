@@ -485,15 +485,15 @@ void HectorMappingRos::undeterminedPointsCallback(const std::pair<std::vector<Ei
 
 }
 
-void HectorMappingRos::localMapCallback(const std::vector<LaserPoint>& data) {
+void HectorMappingRos::localMapCallback(const std::vector<Eigen::Vector2f>& data) {
     sensor_msgs::PointCloud pointcloud_msg;
     uint16_t size = data.size(); 
     pointcloud_msg.points.reserve(size);
 
     for (uint16_t i = 0; i < size; ++i) {
         geometry_msgs::Point32 point; 
-        point.x = data[i].pos_[0];
-        point.y = data[i].pos_[1];
+        point.x = data[i][0];
+        point.y = data[i][1];
         point.z = 0;
         pointcloud_msg.points.push_back(point);
     }
