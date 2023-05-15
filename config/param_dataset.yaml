@@ -5,7 +5,7 @@ sensor:
 extrinsic:
   odom: 
     prime_laser: 
-      upside_down: false  # 倒置 
+      upside_down: true  # 倒置 
       level: [0, 0, 0]   # 主激光雷达 - odom的外参  x,y,theta
 
 # 栅格地图多分辨率金字塔   
@@ -15,7 +15,7 @@ grid_map_pyramid:
       x: 40
       y: 40
   map_depth: 3 # 金子塔层数
-  grid_update_method: "cnt"   # 计数法 cnt     概率法  probability
+  grid_update_method: "probability"   # 计数法 cnt     概率法  probability
 
 kalman_filter:   
   type: "ekf"     # ekf / eskf

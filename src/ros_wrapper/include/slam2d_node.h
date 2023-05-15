@@ -1,35 +1,33 @@
 
 #pragma once 
 
-#include "ros/ros.h"
+#include <ros/ros.h>
 
-#include "tf/transform_listener.h"
-#include "tf/transform_broadcaster.h"
+#include <tf/transform_listener.h>
+#include <tf/transform_broadcaster.h>
 
-#include "sensor_msgs/LaserScan.h"
+#include <sensor_msgs/LaserScan.h>
 #include <sensor_msgs/Imu.h>
 #include <nav_msgs/Odometry.h>
-#include "std_msgs/String.h"
-#include "nav_msgs/GetMap.h"
-#include "laser_geometry/laser_geometry.h"
-#include <sensor_msgs/PointCloud2.h>
-// pcl_ros
-#include <pcl_ros/point_cloud.h>
+#include <std_msgs/String.h>
+#include <nav_msgs/GetMap.h>
+#include <laser_geometry/laser_geometry.h>
 // pcl
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl/common/common.h>
 #include <pcl/common/transforms.h>
-
-#include "../../FrontEnd2D/include/Map/GridMap.h"
-#include "../../FrontEnd2D/include/Estimator/estimator.hpp"
-#include "../../FrontEnd2D/include/Sensor/LaserPointContainer.h"
-#include "../../FrontEnd2D/include/Sensor/SensorData.hpp"
-#include "../../FrontEnd2D/include/util/DataDispatcher.hpp"
-#include "ros_util.h"
-
 #include <boost/thread.hpp>
 #include <chrono>
+#include <sensor_msgs/PointCloud2.h>
+#include <pcl_ros/point_cloud.h>
+#include "ros_util.h"
+// #include "FrontEnd2D/Map/OccGridMapBase.h"
+#include "FrontEnd2D/Estimator/estimator.hpp"
+#include "msa2d/Sensor/LaserPointContainer.h"
+#include "msa2d/Sensor/SensorData.hpp"
+#include "FrontEnd2D/util/DataDispatcher.hpp"
+
 
 class MapPublisherContainer {
 public:
@@ -46,10 +44,10 @@ public:
     void scanCallback(const sensor_msgs::LaserScan &scan);
     void wheelOdomCallback(const nav_msgs::Odometry &odom);
     void imuCallback(const sensor_msgs::Imu &imu);
-    void FusionOdomResultCallback(const TimedPose2d& data);
+    void FusionOdomResultCallback(const msa2d::TimedPose2d& data);
     void lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 1>& ext);
-    void wheelOdomDeadReckoningCallback(const TimedPose2d& pose);
-    void undistortedPointcloudCallback(const hectorslam::LaserPointCloud::Ptr& data);
+    void wheelOdomDeadReckoningCallback(const msa2d::TimedPose2d& pose);
+    void undistortedPointcloudCallback(const msa2d::sensor::LaserPointCloud::Ptr& data);
     void dynamicPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
     void stablePointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
     void undeterminedPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
@@ -58,12 +56,12 @@ public:
 
 private:
     void InitParams();
-    void setMapInfo(nav_msgs::GetMap::Response &map_, const hectorslam::GridMap &gridMap);
-    void publishMap(MapPublisherContainer &map_, const hectorslam::GridMap &gridMap, 
+    void setMapInfo(nav_msgs::GetMap::Response &map_, const msa2d::map::OccGridMapBase* gridMap);
+    void publishMap(MapPublisherContainer &map_, const msa2d::map::OccGridMapBase* gridMap, 
         ros::Time timestamp, std::mutex* mapMutex);
     void publishTFLoop(double pub_period);
     bool rosPointCloudToDataContainer(const sensor_msgs::LaserScan &scan_msg, 
-                                                                                hectorslam::LaserPointCloud& pointCloud);
+                                                                                msa2d::sensor::LaserPointCloud& pointCloud);
 
     struct LaserInfo {
         std::vector<double> index_cos_; // 保存下来雷达各个角度的cos值
@@ -97,10 +95,10 @@ private:
     laser_geometry::LaserProjection projector_;
     sensor_msgs::PointCloud laser_point_cloud_; // 点云格式的雷达数据
 
-    boost::thread *map_publish_thread_;
+    boost::thread* map_publish_thread_;
 
-    hectorslam::FrontEndEstimator *estimator_;
-    hectorslam::LaserPointContainer laserScanContainer;
+    Estimator2D::FrontEndEstimator* estimator_;
+    msa2d::sensor::LaserPointContainer laserScanContainer;
 
     int lastGetMapUpdateIndex;
 

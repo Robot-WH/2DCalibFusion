@@ -1,5 +1,5 @@
 /*
- * Copyright 2021 The Project Author: lixiang
+ * Copyright 2021 The Project Author: lwh
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,14 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-#include "slam2d_node.h"
-
+#include <glog/logging.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <nav_msgs/Odometry.h>
-#include "sensor_msgs/PointCloud2.h"
-
-using namespace hectorslam; 
+#include <sensor_msgs/PointCloud2.h>
+#include "slam2d_node.h"
 
 // 使用PCL中点的数据结构 pcl::PointXYZ
 typedef pcl::PointXYZ PointT;
@@ -37,9 +34,9 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
     laser_scan_subscriber_ = node_handle_.subscribe(primeLaserTopic_name_, 
         p_scan_subscriber_queue_size_, &HectorMappingRos::scanCallback, this); // 雷达数据处理
     wheel_odom_subscriber_ = node_handle_.subscribe(wheelOdomTopic_name_, 
-        100, &HectorMappingRos::wheelOdomCallback, this);
+        100, &HectorMappingRos::wheelOdomCallback, this);   // 轮速计数据处理
     imu_subscriber_ = node_handle_.subscribe(imuTopic_name_, 
-        100, &HectorMappingRos::imuCallback, this);
+        100, &HectorMappingRos::imuCallback, this);     // IMU数据处理 
 
     if (p_pub_odometry_) {
         odometryPublisher_ = node_handle_.advertise<nav_msgs::Odometry>("odom_Fusion", 50);
@@ -61,50 +58,47 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
     // 外参初始化
     ext_prime_laser_to_odom_.setZero(); 
     //订阅融合的里程计结果 
-    util::DataDispatcher::GetInstance().Subscribe("fusionOdom", 
+    ::util::DataDispatcher::GetInstance().Subscribe("fusionOdom", 
                                                                                                     &HectorMappingRos::FusionOdomResultCallback, 
                                                                                                     this, 
                                                                                                     5,
                                                                                                     true);  // 高优先级
     // 订阅激光和odom的外参回调
-    util::DataDispatcher::GetInstance().Subscribe("lidarOdomExt", 
+    ::util::DataDispatcher::GetInstance().Subscribe("lidarOdomExt", 
                                                                                                     &HectorMappingRos::lidarOdomExtransicCallback, 
                                                                                                     this, 
                                                                                                     5);
     // 轮速解算的回调
-    util::DataDispatcher::GetInstance().Subscribe("WheelDeadReckoning", 
+    ::util::DataDispatcher::GetInstance().Subscribe("WheelDeadReckoning", 
                                                                                                     &HectorMappingRos::wheelOdomDeadReckoningCallback, 
                                                                                                     this, 
                                                                                                     5);
     // 去除畸变的回调
-    util::DataDispatcher::GetInstance().Subscribe("undistorted_pointcloud", 
+    ::util::DataDispatcher::GetInstance().Subscribe("undistorted_pointcloud", 
                                                                                                     &HectorMappingRos::undistortedPointcloudCallback, 
                                                                                                     this, 
                                                                                                     5,
                                                                                                     true); // 高优先级  
     // 动态点
-    util::DataDispatcher::GetInstance().Subscribe("dynamic_pointcloud", 
+    ::util::DataDispatcher::GetInstance().Subscribe("dynamic_pointcloud", 
                                                                                                     &HectorMappingRos::dynamicPointsCallback, 
                                                                                                     this, 
                                                                                                     5,
                                                                                                     true); // 高优先级  
     // 静态点
-    util::DataDispatcher::GetInstance().Subscribe("stable_pointcloud", 
+    ::util::DataDispatcher::GetInstance().Subscribe("stable_pointcloud", 
                                                                                                     &HectorMappingRos::stablePointsCallback, 
                                                                                                     this, 
                                                                                                     5,
                                                                                                     true); // 高优先级                         
     // 局部地图
-    util::DataDispatcher::GetInstance().Subscribe("local_map", 
+    ::util::DataDispatcher::GetInstance().Subscribe("local_map", 
                                                                                                     &HectorMappingRos::localMapCallback, 
                                                                                                     this, 
                                                                                                     5);                                                             
     std::string config_path = RosUtils::RosReadParam<std::string>(node_handle_, "ConfigPath");
-
-    estimator_ = new FrontEndEstimator(config_path);
-
-    estimator_->SetUpdateFactorFree(p_update_factor_free_);                // 0.4
-    estimator_->SetUpdateFactorOccupied(p_update_factor_occupied_);        // 0.9
+    // 构建前端估计器  
+    estimator_ = new Estimator2D::FrontEndEstimator(config_path);
     estimator_->SetMapUpdateMinDistDiff(p_map_update_distance_threshold_); // 0.4 m 
     estimator_->SetMapUpdateMinAngleDiff(p_map_update_angle_threshold_);   // 0.78  45度
     // 地图发布器初始化
@@ -138,9 +132,6 @@ HectorMappingRos::HectorMappingRos() : private_node_("~"),
         new boost::thread(boost::bind(&HectorMappingRos::publishMapLoop, this, p_map_pub_period_));
     map_to_odom_.setIdentity();
 
-    // util::Subscriber sub(&HectorMappingRos::imuCallback, this); 
-    // sensor_msgs::Imu imu;
-    // sub.Call(imu); 
 }
 
 HectorMappingRos::~HectorMappingRos() {
@@ -182,9 +173,6 @@ void HectorMappingRos::InitParams() {
     private_node_.param("map_start_y", p_map_start_y_, 0.5);
     private_node_.param("map_multi_res_levels", p_map_multi_res_levels_, 3);
 
-    private_node_.param("update_factor_free", p_update_factor_free_, 0.4);
-    private_node_.param("update_factor_occupied", p_update_factor_occupied_, 0.9);
-
     private_node_.param("map_update_distance_thresh", p_map_update_distance_threshold_, 0.4);
     private_node_.param("map_update_angle_thresh", p_map_update_angle_threshold_, 0.78);
 
@@ -212,7 +200,7 @@ void HectorMappingRos::wheelOdomCallback(const nav_msgs::Odometry& odom_msg) {
         last_time = 0;
         return;  
     }
-    WheelOdom odom;
+    msa2d::sensor::WheelOdom odom;
     double curr_time = odom_msg.header.stamp.toSec();
 
     if (curr_time <= last_time) {
@@ -272,7 +260,7 @@ void HectorMappingRos::imuCallback(const sensor_msgs::Imu& imu_msg) {
     // i++;
     //std::cout << common::RED << "imu index: " << i << common::RESET << std::endl;
 
-    ImuData imu; 
+    msa2d::sensor::ImuData imu; 
     imu.time_stamp_ = curr_time;
     imu.acc_ = Eigen::Vector3d{imu_msg.linear_acceleration.x, 
                                                             imu_msg.linear_acceleration.y,
@@ -344,7 +332,7 @@ void HectorMappingRos::scanCallback(const sensor_msgs::LaserScan &scan) {
     } 
     // start_time_ = std::chrono::steady_clock::now();
     // 将 scan 转换成 点云格式
-    LaserPointCloud::ptr laser_ptr(new LaserPointCloud());
+    msa2d::sensor::LaserPointCloud::ptr laser_ptr(new msa2d::sensor::LaserPointCloud());
     // 将雷达数据的点云格式 更改成 hector 内部的数据格式
     if (rosPointCloudToDataContainer(scan, *laser_ptr)) {
         // 进入扫描匹配与地图更新
@@ -357,14 +345,14 @@ void HectorMappingRos::scanCallback(const sensor_msgs::LaserScan &scan) {
 
     // if (p_timing_output_) {
     //     ros::WallDuration duration = ros::WallTime::now() - startTime;
-    //     ROS_INFO("HectorSLAM Iter took: %f milliseconds", duration.toSec() * 1000.0f);
+    //     ROS_INFO("Estimator2D Iter took: %f milliseconds", duration.toSec() * 1000.0f);
     // }
 }
 
 /**
  * @brief: 接收融合算法计算的结果 
  */
-void HectorMappingRos::FusionOdomResultCallback(const TimedPose2d& data) {
+void HectorMappingRos::FusionOdomResultCallback(const msa2d::TimedPose2d& data) {
     // std::cout << common::YELLOW << "FusionOdom ----------------------------" 
     // << common:: RESET << std::endl;
     if (data.time_stamp_ < 0) return;  
@@ -409,7 +397,7 @@ void HectorMappingRos::lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 
 } 
 
 // 原始wheel 航迹推算，调试用
-void HectorMappingRos::wheelOdomDeadReckoningCallback(const TimedPose2d& pose) {
+void HectorMappingRos::wheelOdomDeadReckoningCallback(const msa2d::TimedPose2d& pose) {
     geometry_msgs::PoseWithCovarianceStamped pose_info = 
         RosUtils::GetPoseWithCovarianceStamped(Eigen::Vector3f{pose.pose_.x(), pose.pose_.y(), pose.pose_.yaw()}, 
                                                                                                 Eigen::Matrix3f::Zero(), 
@@ -423,7 +411,7 @@ void HectorMappingRos::wheelOdomDeadReckoningCallback(const TimedPose2d& pose) {
 }
 
 // 接收到去畸变的点云
-void HectorMappingRos::undistortedPointcloudCallback(const LaserPointCloud::Ptr& data) {
+void HectorMappingRos::undistortedPointcloudCallback(const msa2d::sensor::LaserPointCloud::Ptr& data) {
     // std::cout << common::GREEN << "send undistortedPointcloud ----------------------------" 
     // << common::RESET << std::endl;
     sensor_msgs::PointCloud pointcloud_msg;
@@ -466,6 +454,10 @@ void HectorMappingRos::stablePointsCallback(const std::pair<std::vector<Eigen::V
     sensor_msgs::PointCloud pointcloud_msg;
     uint16_t size = data.first.size(); 
     pointcloud_msg.points.reserve(size);
+    if (size == 0) {
+        std::cout << msa2d::color::RED << "stablePoints empty !!! " << msa2d::color::RESET << std::endl;
+        return;  
+    }
 
     for (uint16_t i = 0; i < size; ++i) {
         geometry_msgs::Point32 point; 
@@ -507,7 +499,7 @@ void HectorMappingRos::localMapCallback(const std::vector<Eigen::Vector2f>& data
  * @param[out] laser 按照激光的角度从小到大排列
  */ 
 bool HectorMappingRos::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan_msg, 
-                                                                                                                        LaserPointCloud& laser) {
+                                                                                                                        msa2d::sensor::LaserPointCloud& laser) {
     size_t size = scan_msg.ranges.size();
     laser.pointcloud_.reserve(size);
     laser.start_time_ = scan_msg.header.stamp.toSec();
@@ -520,7 +512,7 @@ bool HectorMappingRos::rosPointCloudToDataContainer(const sensor_msgs::LaserScan
             scan_msg.ranges[i] > laser_max_dist_) {
             continue;
         }
-        LaserPoint point;   
+        msa2d::sensor::LaserPoint point;   
         point.pos_ = {scan_msg.ranges[i] * laser_info_.index_cos_[i],   // x
                                     scan_msg.ranges[i] * laser_info_.index_sin_[i]};   // y 
         point.range_ = scan_msg.ranges[i];
@@ -534,16 +526,17 @@ bool HectorMappingRos::rosPointCloudToDataContainer(const sensor_msgs::LaserScan
 }
 
 // 对ROS地图进行数据初始化与分配内存
-void HectorMappingRos::setMapInfo(nav_msgs::GetMap::Response& map_, const hectorslam::GridMap& gridMap) {
-    Eigen::Vector2f mapOrigin(gridMap.getWorldCoords(Eigen::Vector2f::Zero()));   // Map原点的world坐标
-    mapOrigin.array() -= gridMap.getCellLength() * 0.5f;
+void HectorMappingRos::setMapInfo(nav_msgs::GetMap::Response& map_, 
+        const msa2d::map::OccGridMapBase* gridMap) {
+    Eigen::Vector2f mapOrigin(gridMap->getGridMapBase().getWorldCoords(Eigen::Vector2f::Zero()));   // Map原点的world坐标
+    mapOrigin.array() -= gridMap->getGridMapBase().getCellLength() * 0.5f;
 
     map_.map.info.origin.position.x = mapOrigin.x();
     map_.map.info.origin.position.y = mapOrigin.y();
     map_.map.info.origin.orientation.w = 1.0;
-    map_.map.info.resolution = gridMap.getCellLength();
-    map_.map.info.width = gridMap.getSizeX();
-    map_.map.info.height = gridMap.getSizeY();
+    map_.map.info.resolution = gridMap->getGridMapBase().getCellLength();
+    map_.map.info.width = gridMap->getGridMapBase().getSizeX();
+    map_.map.info.height = gridMap->getGridMapBase().getSizeY();
 
     map_.map.header.frame_id = laserOdomFrame_name_;    // 设置map的参考坐标系  
     // 分配内存空间
@@ -565,13 +558,13 @@ void HectorMappingRos::publishMapLoop(double map_pub_period) {
 
 // 发布ROS地图
 void HectorMappingRos::publishMap(MapPublisherContainer& mapPublisher,
-                                  const hectorslam::GridMap& gridMap,
+                                  const msa2d::map::OccGridMapBase* gridMap,
                                   ros::Time timestamp, std::mutex* mapMutex) {
     nav_msgs::GetMap::Response& map_(mapPublisher.map_);
     //only update map if it changed
-    if (lastGetMapUpdateIndex != gridMap.getUpdateIndex()) {
-        int sizeX = gridMap.getSizeX();
-        int sizeY = gridMap.getSizeY();
+    if (lastGetMapUpdateIndex != gridMap->getGridMapBase().getUpdateIndex()) {
+        int sizeX = gridMap->getGridMapBase().getSizeX();
+        int sizeY = gridMap->getGridMapBase().getSizeY();
         int size = sizeX * sizeY;
         std::vector<int8_t> &data = map_.map.data;
         //std::vector contents are guaranteed to be contiguous, use memset to set all to unknown to save time in loop
@@ -581,16 +574,16 @@ void HectorMappingRos::publishMap(MapPublisherContainer& mapPublisher,
 
         for (int i = 0; i < size; ++i) {
             // 空闲：0， 占据：100，未知：-1
-            if (gridMap.isFree(i)) {
+            if (gridMap->isFree(i)) {
                 data[i] = 0;
-            } else if (gridMap.isOccupied(i)) {
+            } else if (gridMap->isOccupied(i)) {
                 data[i] = 100;
             }
         }
 
-        lastGetMapUpdateIndex = gridMap.getUpdateIndex();
-        Eigen::Vector2f mapOrigin(gridMap.getWorldCoords(Eigen::Vector2f::Zero()));   // Map原点的world坐标
-        mapOrigin.array() -= gridMap.getCellLength() * 0.5f;
+        lastGetMapUpdateIndex = gridMap->getGridMapBase().getUpdateIndex();
+        Eigen::Vector2f mapOrigin(gridMap->getGridMapBase().getWorldCoords(Eigen::Vector2f::Zero()));   // Map原点的world坐标
+        mapOrigin.array() -= gridMap->getGridMapBase().getCellLength() * 0.5f;
 
         map_.map.info.origin.position.x = mapOrigin.x();
         map_.map.info.origin.position.y = mapOrigin.y();
@@ -607,7 +600,19 @@ void HectorMappingRos::publishMap(MapPublisherContainer& mapPublisher,
 // }
 
 int main(int argc, char **argv) {
-    ros::init(argc, argv, "lesson4_hector_slam");
+    ros::init(argc, argv, "fusion estimator");
+    std::cout << "laser-imu-wheel fusion estimator, running in ARM..." << std::endl;
+    
+    char* home_dir = getenv("HOME");
+    std::string home_dir_str(home_dir);
+    std::string log_dir = home_dir_str + "/log";
+    FLAGS_log_dir = log_dir;
+    // FLAGS_logbufsecs = 5;   // 没隔5s写一次磁盘
+    // FLAGS_max_log_size = 10; // 设置单个日志文件大小上限为 10MB
+    google::InitGoogleLogging(argv[0]);
+    // google::SetLogDestination(google::GLOG_INFO, "/home/lwh/log/info.log");
+    // google::SetLogDestination(google::GLOG_WARNING, "/path/to/warning.log");
+    // google::SetLogDestination(google::GLOG_ERROR, "/path/to/error.log");
     HectorMappingRos hector_slam;
     ros::spin();
     return (0);

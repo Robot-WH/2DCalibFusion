@@ -18,6 +18,6 @@
 
     <!-- launch rviz -->
     <node name="rviz" pkg="rviz" type="rviz" required="true"
-        args="-d $(find CalibFusion2D)/config/hector_slam.rviz" />
+        args="-d $(find CalibFusion2D)/config/slam.rviz" />
 
 </launch>

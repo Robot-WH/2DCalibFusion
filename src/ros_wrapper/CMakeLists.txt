@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 # set(CMAKE_BUILD_TYPE "Debug")
 set(CMAKE_BUILD_TYPE "Release")
-set(CMAKE_CXX_FLAGS "-O3")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 
 # List C++ dependencies on ros packages
 
@@ -31,7 +31,7 @@ if(NOT EIGEN3_FOUND)
 else()
   set(EIGEN3_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIR})
 endif()
-
+find_package(glog  REQUIRED)
 ###########
 ## Build ##
 ###########
@@ -44,19 +44,21 @@ include_directories(
   ${EIGEN3_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
   ${Boost_INCLUDE_DIRS}
+  ${libnabo_INCLUDE_DIRS}
+  ${FrontEnd2D_INCLUDE_DIR}
+  ${MSALib_INCLUDE_DIR}
 )
 
 ## occupancy_grid
-add_executable(occupancy_grid_node
-  src/occupancy_grid/occupancy_grid.cc
-)
-add_dependencies(occupancy_grid_node 
-  ${catkin_EXPORTED_TARGETS}
-)
-target_link_libraries(occupancy_grid_node
-  ${catkin_LIBRARIES}
-)
-
+# add_executable(occupancy_grid_node
+#   src/occupancy_grid/occupancy_grid.cc
+# )
+# add_dependencies(occupancy_grid_node 
+#   ${catkin_EXPORTED_TARGETS}
+# )
+# target_link_libraries(occupancy_grid_node
+#   ${catkin_LIBRARIES}
+# )
 
 ## SLAM
 add_executable(slam2d_node
@@ -70,7 +72,19 @@ add_dependencies(slam2d_node
 target_link_libraries(slam2d_node
   ${catkin_LIBRARIES}
   ${Boost_LIBRARIES}
-  yaml-cpp
-  ${libnabo_LIBRARIES}
+  Estimator2D
 )
+
+#---------------------------------------------------------------------------------------
+# Install
+#---------------------------------------------------------------------------------------
+
+install(TARGETS slam2d_node
+	ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+	LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+	RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+	)
+
+
+
 

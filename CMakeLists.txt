@@ -1,14 +1,12 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(calib_fusion_2d)
-# ## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
-# set(CMAKE_BUILD_TYPE Debug)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 # set(CMAKE_BUILD_TYPE "Debug")
 set(CMAKE_BUILD_TYPE "Release")
-set(CMAKE_CXX_FLAGS "-O3")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 
 # List C++ dependencies on ros packages
 set( ROS_CXX_DEPENDENCIES
@@ -43,19 +41,23 @@ catkin_package(
 
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
-include_directories(
-  ${catkin_INCLUDE_DIRS}
-)
 
-add_subdirectory(src/Lib/libpointmatcher-master)
+# message("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%catkin_INCLUDE_DIRS:" ${catkin_INCLUDE_DIRS})
+
+# add_subdirectory(src/Lib/libpointmatcher-master)
 add_subdirectory(src/FrontEnd2D)
 add_subdirectory(src/ros_wrapper)
+
+include_directories(
+  ${FrontEnd2D_INCLUDE_DIR}
+)
 
 add_executable(test_rot_2d
   src/test/test_rot_2d.cpp
 )
-
-target_link_libraries(test_rot_2d
+target_include_directories(test_rot_2d PRIVATE
+  ${catkin_INCLUDE_DIRS}    # 包含 /usr/include/eigen3 
 )
 
 add_executable(test_data_dispatcher
@@ -64,4 +66,18 @@ add_executable(test_data_dispatcher
 
 target_link_libraries(test_data_dispatcher
   ${catkin_LIBRARIES}
+)
+
+  #############
+  ## INSTALL ##
+  #############
+
+install(
+  DIRECTORY launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+install(
+  DIRECTORY config
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )

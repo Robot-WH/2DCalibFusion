@@ -14,8 +14,7 @@
 #include <deque>
 #include <mutex>
 #include <thread>
-#include <eigen3/Eigen/Dense>
-
+#include <Eigen/Dense>
 
 int main()
 {
