@@ -275,7 +275,12 @@ void FrontEndEstimator::run() {
 
                 last_fusionOdom_pose_.pose_ = estimated_odom_pose;
                 last_fusionOdom_pose_.time_stamp_ = curr_laser_ptr->end_time_; 
-                // std::cout << "odom correct : " << estimated_odom_pose.vec().transpose() << std::endl;
+                // 发布数据
+                ::util::DataDispatcher::GetInstance().Publish("fusionOdom", last_fusionOdom_pose_); 
+                ::util::DataDispatcher::GetInstance().Publish("dynamic_pointcloud", dynamic_points_data); 
+                ::util::DataDispatcher::GetInstance().Publish("stable_pointcloud", stable_points_data); 
+                ::util::DataDispatcher::GetInstance().Publish("local_map", local_map_.ReadLocalMap()); 
+
                 /** 2.地图更新(last_map_updata_pose_初始化为一个很大的值，因此第一帧点云就会更新地图) **/
                 if (msa2d::module::poseDifferenceLargerThan(new_estimate_laserOdom_pose.vec(), last_map_updata_pose_.vec(), 
                         paramMinDistanceDiffForMapUpdate, paramMinAngleDiffForMapUpdate)) { 
@@ -285,11 +290,6 @@ void FrontEndEstimator::run() {
                     local_map_.UpdateLocalMapForMotion(stable_points_data.first);
                     last_map_updata_pose_ = new_estimate_laserOdom_pose;
                 }
-                // 发布数据
-                ::util::DataDispatcher::GetInstance().Publish("fusionOdom", last_fusionOdom_pose_); 
-                ::util::DataDispatcher::GetInstance().Publish("dynamic_pointcloud", dynamic_points_data); 
-                ::util::DataDispatcher::GetInstance().Publish("stable_pointcloud", stable_points_data); 
-                ::util::DataDispatcher::GetInstance().Publish("local_map", local_map_.ReadLocalMap()); 
 
                 laser_sm_.lock();
                 laser_cache_.pop_front();  
