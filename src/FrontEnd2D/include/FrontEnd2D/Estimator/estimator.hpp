@@ -99,7 +99,7 @@ protected:
      * @param laser 
      * @param motion_info 
      */
-    void LaserUndistorted(msa2d::sensor::LaserPointCloud::Ptr& laser, const Path& motion_info); 
+    void LaserUndistorted(msa2d::sensor::LaserPointCloud& laser, Path& motion_info); 
 
     /**
      * @brief: 
@@ -133,6 +133,7 @@ protected:
     bool extractSensorData(std::deque<DataT_>& data_cache, std::deque<DataT_>& extracted_container,
             const double& start_time, const double& end_time);
 
+    void transformPathFromOdomToLaser(Path& motion_info);
     // 激光雷达的运动转到Odom系
     void posePrimeLaserToOdom(const msa2d::Pose2d& pose_in_laser, msa2d::Pose2d& pose_in_world);
 
@@ -156,7 +157,8 @@ protected:
     float getScaleToMap() const { return grid_map_pyramid_->getScaleToMap(); };    // 返回第 0层的scale  
 
 private:
-
+    enum class MODE {pure_lidar, lio, lwio};  // 三种模式  纯激光，lio-激光IMU融合，lwio-激光imu轮速融合 
+    MODE work_mode = MODE::pure_lidar; 
     msa2d::map::OccGridMapPyramid* grid_map_pyramid_; // 地图接口对象--纯虚类进行
     msa2d::map::PointcloudLocalMap local_map_;  
     msa2d::ScanMatcher::hectorScanMatcher* hector_matcher_;
@@ -172,6 +174,7 @@ private:
     // Eigen::Isometry3f primeLaserOdomExtrinsic_;  
     msa2d::Pose2d last_map_updata_pose_;
     msa2d::TimedPose2d last_fusionOdom_pose_;
+    msa2d::Pose2d last_lidarOdom_pose_;
     Eigen::Matrix3f lastScanMatchCov;
     float linear_v_ = 0;
     float rot_v_ = 0; 

@@ -53,6 +53,35 @@ static Eigen::Matrix3d Vector2Transform(Eigen::Vector3d const& vec) {
 }
 
 /**
+ * @brief 最短路角度插值 
+ * 
+ * @param startAngle 
+ * @param endAngle 
+ * @param ratio 
+ * @return double 
+ */
+double shortestPathInterpolateAngle(double startAngle, double endAngle, double ratio) {
+    // 规范化起始角度和结束角度
+    startAngle = NormalizationAngle(startAngle);
+    endAngle = NormalizationAngle(endAngle);
+
+    // 计算最短路径的插值角度
+    double difference = endAngle - startAngle;
+
+    if (difference > M_PI) {
+        difference -= 2 * M_PI;
+    } else if (difference < -M_PI) {
+        difference += 2 * M_PI;
+    }
+
+    double interpolatedAngle = startAngle + ratio * difference;
+    // 规范化插值角度
+    interpolatedAngle = NormalizationAngle(interpolatedAngle);
+
+    return interpolatedAngle;
+}
+
+/**
  * @brief 对某一个点进行转换．
  * @return (x,y)
  **/
@@ -81,15 +110,18 @@ static _T LinearInterpolate(const _T& front_value, const _T& back_value, double 
  * @details: 部分类型的插值需要进行特化  
  */    
 template<>
-msa2d::Pose2d LinearInterpolate<msa2d::Pose2d>(const msa2d::Pose2d& front_value, const msa2d::Pose2d& back_value, 
-                                                                          double const& front_time, double const& back_time, 
-                                                                          double const& time) {
-    float front_coeff = (back_time - time) / (back_time - front_time);
-    float back_coeff = (time - front_time) / (back_time - front_time);
-    double x = front_coeff * front_value.x() + back_coeff * back_value.x();  
-    double y = front_coeff * front_value.y() + back_coeff * back_value.y();  
-    Eigen::Quaternionf orientation = front_value.orientation().slerp(back_coeff, back_value.orientation());
-    return msa2d::Pose2d(x, y, orientation);  
+msa2d::Pose2d LinearInterpolate<msa2d::Pose2d>(const msa2d::Pose2d& start_value, 
+                                                                                                            const msa2d::Pose2d& end_value, 
+                                                                                                            double const& start_time, 
+                                                                                                            double const& end_time, 
+                                                                                                            double const& time) {
+    float ratio = (time - start_time) / (end_time - start_time);                                                                                                                                                                         
+    double x = start_value.x() + ratio * (end_value.x() - start_value.x());  
+    double y = start_value.y() + ratio * (end_value.y() - start_value.y());  
+    //Eigen::Quaternionf orientation = start_value.orientation().slerp(back_coeff, end_value.orientation());
+    double theta = shortestPathInterpolateAngle(start_value.yaw(), end_value.yaw(), ratio);
+
+    return msa2d::Pose2d(x, y, theta);  
 } 
 
 /**

@@ -339,10 +339,10 @@ class HandEyeCalib2D {
             primary_sensor_accum_pose_ = primary_sensor_accum_pose_ * pose_primary;
             sub_sensor_accum_pose_ = sub_sensor_accum_pose_ * pose_sub; 
 
-            std::cout<<"pose_primary x: "<<pose_primary.x()<<", y: "<<pose_primary.y()
-            <<", orientation_: "<<pose_primary.orientation().coeffs().transpose()<<std::endl;
-            std::cout<<"pose_sub x: "<<pose_sub.x()<<", y: "<<pose_sub.y()
-            <<", orientation_: "<<pose_sub.orientation().coeffs().transpose()<<std::endl;
+            // std::cout<<"pose_primary x: "<<pose_primary.x()<<", y: "<<pose_primary.y()
+            // <<", orientation_: "<<pose_primary.orientation().coeffs().transpose()<<std::endl;
+            // std::cout<<"pose_sub x: "<<pose_sub.x()<<", y: "<<pose_sub.y()
+            // <<", orientation_: "<<pose_sub.orientation().coeffs().transpose()<<std::endl;
 
             // 旋转累计到一定大小时
             if (std::fabs(primary_sensor_accum_pose_.yaw())> ROT_THRESH 
@@ -356,8 +356,8 @@ class HandEyeCalib2D {
                     return false;
                 }
 
-                std::cout<<"primary_sensor_accum_pose_ orientation_: "<<primary_sensor_accum_pose_.orientation().coeffs().transpose()<<std::endl;
-                                std::cout<<"sub_sensor_accum_pose_ orientation_: "<<sub_sensor_accum_pose_.orientation().coeffs().transpose()<<std::endl;
+                // std::cout<<"primary_sensor_accum_pose_ orientation_: "<<primary_sensor_accum_pose_.orientation().coeffs().transpose()<<std::endl;
+                // std::cout<<"sub_sensor_accum_pose_ orientation_: "<<sub_sensor_accum_pose_.orientation().coeffs().transpose()<<std::endl;
                 return true;  
             }
             return false;  

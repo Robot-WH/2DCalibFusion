@@ -44,7 +44,7 @@ public:
      * @return {*}
      */        
     void Update(const double& time_stamp, const float& linear_velocity, 
-                                    const float& angular_velocity ) {
+                                const float& angular_velocity ) {
         // 非初始状态 
         if (last_pose_.time_stamp_ != -1) {
             double dt = time_stamp - last_pose_.time_stamp_;

@@ -15,11 +15,11 @@ grid_map_pyramid:
       x: 40
       y: 40
   map_depth: 3 # 金子塔层数
-  grid_update_method: "cnt"   # 计数法 cnt     概率法  probability
+  grid_update_method: "probability"   # 计数法 cnt     概率法  probability
 
 kalman_filter:   
   type: "ekf"     # ekf / eskf
   coordinate: "globalcentric"     # 参考坐标系  globalcentric / robocentric
-  enable: true
+  enable: false
 
           

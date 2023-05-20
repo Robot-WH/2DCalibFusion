@@ -18,11 +18,13 @@
 
         <param name="scan_topic" value="scan"/>
         <param name="wheel_topic" value="odomq"/>
-        <param name="imu_topic" value="imuq"/>
-        <param name="scan_frame" value="front_laser_link"/>
+        <param name="imu_topic" value="imu"/>
+        <param name="prime_laser_frame" value="primeLaser_link"/>
         <param name="use_max_scan_range" value="20"/>
         <param name="laser_min_dist" value="0.2"/>
         <param name="laser_max_dist" value="30"/>
+        <!-- laser_imaging_reversed: 即激光雷达点云的排列和实际激光雷达旋转的方向相反 -->
+        <param name="laser_imaging_reversed" value="true"/>      
 
         <param name="map_pub_period" value="2"/>
         <param name="map_resolution" value="0.05"/>

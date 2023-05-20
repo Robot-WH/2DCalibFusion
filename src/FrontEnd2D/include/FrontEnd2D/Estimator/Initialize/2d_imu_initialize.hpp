@@ -49,7 +49,7 @@ private:
             std::cout << msa2d::color::YELLOW << "yaw_velocity_avg: " << yaw_velocity_avg_
                 << ",yaw_velocity_var: " << yaw_velocity_var_ << msa2d::color::RESET << std::endl;
             // 如果方差和均值足够小，则认为该均值估计可信
-            if (yaw_velocity_avg_ < 1e-1&& yaw_velocity_var_ < 1e-6) {
+            if (std::fabs(yaw_velocity_avg_) < 1e-1&& std::fabs(yaw_velocity_var_) < 1e-5) {
                 yaw_bias_ = yaw_velocity_avg_;
                 return true; 
             } else {

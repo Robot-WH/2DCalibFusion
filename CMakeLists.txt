@@ -51,6 +51,7 @@ add_subdirectory(src/ros_wrapper)
 
 include_directories(
   ${FrontEnd2D_INCLUDE_DIR}
+  ${MSALib_INCLUDE_DIR}
 )
 
 add_executable(test_rot_2d

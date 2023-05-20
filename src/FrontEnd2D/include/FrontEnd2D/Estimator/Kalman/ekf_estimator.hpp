@@ -2,7 +2,6 @@
 #pragma once 
 #include "common.hpp"
 namespace Estimator2D {
-
 /**
  * @brief: 常规EKF估计框架
  * @details 状态 位置 + 旋转 + 速度
@@ -38,8 +37,6 @@ public:
      * @brief: 没有任何传感器输入时的匀速运动学模型预测
      */    
     void Predict(const double& start_time, const double& end_time, DiffModelDeadReckoning& diff_model) {
-        std::cout << msa2d::color::YELLOW << "使用运动学模型预测 ..." 
-        << msa2d::color::RESET << std::endl; 
         // 没有轮速数据则用运动学模型预测
         float filtered_linear_v = (prev_state_.X_[3] + last_state_.X_[3]) / 2;
         float filtered_rot_v = (prev_state_.X_[4] + last_state_.X_[4]) / 2;
@@ -50,6 +47,14 @@ public:
             0.25, 5, end_time); 
     }
 
+    /**
+     * @brief 
+     * 
+     * @param angular_velocity_measurement 
+     * @param noise_angular_velocity 
+     * @param time_stamp 
+     * @param diff_model 
+     */
     virtual void Predict(const float& angular_velocity_measurement, const float& noise_angular_velocity, 
             const double& time_stamp, DiffModelDeadReckoning& diff_model) {}
 
@@ -115,6 +120,13 @@ public:
         // std::cout << state_.cov_ << std::endl;
     }
 
+    /**
+     * @brief EKF 校正
+     * 
+     * @param obs 
+     * @param obs_cov 
+     * @param time_stamp 
+     */
     virtual void Correct(const msa2d::Pose2d& obs, const Eigen::MatrixXf& obs_cov, const double& time_stamp) {
         // std::cout << "校正，time_stamp: " << std::setprecision(15) << time_stamp << ", last_time_: "
         //     << last_time_ << std::endl;
@@ -152,12 +164,17 @@ public:
         prev_state_ = last_state_;
         last_state_ = state_; 
         last_pose_ = last_posteriori_pose_;
-        // std::cout << "校正完成, " << "状态: " << state_.X_.transpose() << std::endl;
+        std::cout << "校正完成, " << "状态: " << state_.X_.transpose() << std::endl;
         // std::cout << "cov: " << std::endl;
         // std::cout << state_.cov_ << std::endl;
         // util::SaveDataCsv<double>("", "v.csv", {state_.X_[3], state_.X_[4]}, {"linear_v", "yaw_v"});
     }
     
+    /**
+     * @brief 
+     * 
+     * @return const State& 
+     */
     const State& ReadState() const {
         return state_; 
     }

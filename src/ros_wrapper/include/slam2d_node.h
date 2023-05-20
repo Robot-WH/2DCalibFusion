@@ -37,17 +37,17 @@ public:
     ros::ServiceServer dynamicMapServiceServer_;
 };
 
-class HectorMappingRos {
+class RosWrapper {
 public:
-    HectorMappingRos();
-    ~HectorMappingRos();
+    RosWrapper();
+    ~RosWrapper();
     void scanCallback(const sensor_msgs::LaserScan &scan);
     void wheelOdomCallback(const nav_msgs::Odometry &odom);
     void imuCallback(const sensor_msgs::Imu &imu);
     void FusionOdomResultCallback(const msa2d::TimedPose2d& data);
     void lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 1>& ext);
     void wheelOdomDeadReckoningCallback(const msa2d::TimedPose2d& pose);
-    void undistortedPointcloudCallback(const msa2d::sensor::LaserPointCloud::Ptr& data);
+    void undistortedPointcloudCallback(const msa2d::sensor::LaserPointCloud& data);
     void dynamicPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
     void stablePointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
     void undeterminedPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
@@ -70,6 +70,7 @@ private:
         double time_increment_;  
         float laser_period_;   // 激光一帧的时间
         int laser_num_;   // 激光点的数量
+        bool laser_imaging_reversed_ = false;  // 激光雷达点云的排列和实际激光雷达旋转的方向相反
     }laser_info_;
 
     ros::NodeHandle node_handle_;  // ros中的句柄
@@ -101,8 +102,6 @@ private:
     msa2d::sensor::LaserPointContainer laserScanContainer;
 
     int lastGetMapUpdateIndex;
-
-    // Hector中的各种参数
 
     std::string baseFrame_name_; // base_frame
     std::string mapFrame_name_;  // map的frame
