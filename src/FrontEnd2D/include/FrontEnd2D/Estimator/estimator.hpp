@@ -72,11 +72,6 @@ protected:
                                                             const msa2d::map::OccGridMapBase* occGridMap);
 
     /**
-     * @brief: 激光点投影到世界坐标
-     */    
-    void pointProjection(const msa2d::sensor::LaserPointCloud::Ptr& laser_ptr, const msa2d::Pose2d& pose);
-
-    /**
      * @brief: 激光点分类
      * @details 将点分为 ：动态点、稳定点、待定点 
      * @param laser_ptr 转到了地图坐标系的激光点 

@@ -188,7 +188,6 @@ void FrontEndEstimator::run() {
                             std::cout << msa2d::color::GREEN << "运动学 ------- IMU预测..." << msa2d::color::RESET << std::endl;
                         }
                         use_motion_model_predict = false;   
-                        std::cout << "imu_selected.size(): " << imu_selected.size() << std::endl;
                         // 使用IMU的角速度
                         for (uint16_t i = 0; i < imu_selected.size(); ++i) {
                             const auto& curr_data = imu_selected[i]; 
@@ -216,22 +215,12 @@ void FrontEndEstimator::run() {
                 } 
                 msa2d::Pose2d predict_incre_pose;   // 预测帧间的运动 
                 predict_incre_pose = diff_model.ReadLastPose().pose_;
-                std::cout << msa2d::color::YELLOW << "predict_incre_pose: " << predict_incre_pose.vec().transpose()
-                    << msa2d::color::RESET << std::endl;
-
-
-
-                //  发布去畸变前的点云
-                 msa2d::sensor::LaserPointCloud distorted_pointcloud = *curr_laser_ptr; 
-                ::util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", distorted_pointcloud); 
-                
-                
-                
+                // std::cout << msa2d::color::YELLOW << "predict_incre_pose: " << predict_incre_pose.vec().transpose()
+                //     << msa2d::color::RESET << std::endl;
                 if (imu_calib_) {
                     LaserUndistorted(*curr_laser_ptr, diff_model.GetPath());// 去除laser的畸变
                 }
                 // ::util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", *curr_laser_ptr); 
-                // std::cout << "不去畸变" << std::endl;
                 msa2d::Pose2d estimated_odom_pose = last_fusionOdom_pose_.pose_ * predict_incre_pose;   // To<-last * Tlast<-curr
                 // 将odom系下的预测位姿转换到laser odom下
                 msa2d::Pose2d new_estimate_laserOdom_pose;
@@ -251,9 +240,9 @@ void FrontEndEstimator::run() {
                 // 将pose转换到odom系下
                 posePrimeLaserToOdom(new_estimate_laserOdom_pose, estimated_odom_pose);
                 // std::cout << "Odom_pose: " << estimated_odom_pose.vec().transpose() << std::endl;
-                msa2d::Pose2d scan_matched_incre_pose = last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
-                std::cout << msa2d::color::YELLOW << "scan_matched_incre_pose: " << scan_matched_incre_pose.vec().transpose()
-                    << msa2d::color::RESET << std::endl;
+                // msa2d::Pose2d scan_matched_incre_pose = last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
+                // std::cout << msa2d::color::YELLOW << "scan_matched_incre_pose: " << scan_matched_incre_pose.vec().transpose()
+                //     << msa2d::color::RESET << std::endl;
                 // 校准IMU
                 if (!imu_calib_) {
                     msa2d::Pose2d scan_matched_incre_pose = last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
@@ -264,9 +253,7 @@ void FrontEndEstimator::run() {
                         }
                         imu_calib_ = true;  
                     }
-                } else {
-                    std::cout << "imu_coeff: " << imu_coeff_ << std::endl;
-                }
+                } 
           
                 // 在IMU&odom初始化前，这里执行的是基于先验运动模型的EKF
                 if (ekf_estimate_enable_ && ekf_estimator_ != nullptr) {
@@ -293,7 +280,11 @@ void FrontEndEstimator::run() {
                 // stable_points_data.second = curr_laser_ptr->start_time_; 
                 undetermined_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());  
                 undetermined_points_data.second = curr_laser_ptr->end_time_; 
-                pointProjection(curr_laser_ptr, new_estimate_laserOdom_pose);
+                //  将激光点从激光坐标系转到laserOdom系 
+                for (auto& point : curr_laser_ptr->pointcloud_) {
+                    point.pos_ = new_estimate_laserOdom_pose * point.pos_;      //  转到laserOdom系 
+                }
+
                 pointClassification(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(2), 
                     dynamic_points_data.first, stable_points_data.first, undetermined_points_data.first);
                 // 系统初始化是指 联合imu和wheel的多传感器初始化
@@ -381,19 +372,6 @@ bool FrontEndEstimator::fastPredictFailureDetection(const msa2d::sensor::LaserPo
  * 
  * @param laser_ptr 
  * @param pose 
- */
-void FrontEndEstimator::pointProjection(const msa2d::sensor::LaserPointCloud::Ptr& laser_ptr, 
-                                                                                        const msa2d::Pose2d& pose) {
-    for (auto& point : laser_ptr->pointcloud_) {
-        point.pos_ = pose * point.pos_;      //  转到laserOdom系 
-    }
-}
-
-/**
- * @brief 
- * 
- * @param laser_ptr 
- * @param pose 
  * @param occGridMap 
  * @param dynamic_points 
  * @param stable_points 
@@ -459,13 +437,8 @@ void FrontEndEstimator::LaserUndistorted(msa2d::sensor::LaserPointCloud& laser,
     //   back -------------> front
     for (uint16_t i = motion_info.size() - 1; i >= 1; --i) {
         back_relate_begin_pose = begin_pose.inv() * motion_info[i - 1].pose_;  //T_end<-curr = T_end<-begin * T_begin<-curr
-        msa2d::Pose2d P_sc = begin_pose * back_relate_begin_pose;
-
         part_back_time = motion_info[i - 1].time_stamp_ - motion_info.front().time_stamp_;
-        // std::cout << "curr_motion: " << motion_info[i].pose_.vec().transpose() << std::endl;
-        // std::cout << "P_sc: " << P_sc.vec().transpose() << std::endl;
-        // std::cout << "motion_info[i - 1].pose_: " << motion_info[i - 1].pose_.vec().transpose() << std::endl;
-        // std::cout << "i: " << i << std::endl;
+
         while (ptr >= 0) {
             if (laser.pointcloud_[ptr].rel_time_ < part_back_time) {
                 break;
@@ -479,80 +452,15 @@ void FrontEndEstimator::LaserUndistorted(msa2d::sensor::LaserPointCloud& laser,
                 point_pose = util::LinearInterpolate(front_relate_begin_pose, back_relate_begin_pose, 
                                                                                             part_front_time, part_back_time, laser.pointcloud_[ptr].rel_time_); 
             }
-            // std::cout << "point_pose vec(): " << point_pose.vec().transpose() << std::endl;
-            // point_pose.SetRotation(-point_pose.yaw());
             // 将激光点观测转换到 最后一个点的坐标系   T_end<-curr * p_curr = p_end
             laser.pointcloud_[ptr].pos_ = point_pose * laser.pointcloud_[ptr].pos_;
-            // ptr -= 20;  
             --ptr;
         }
         if (ptr < 0) break;  
-        // std::cout << "ptr: " << ptr << std::endl;
         front_relate_begin_pose = back_relate_begin_pose; 
         part_front_time = part_back_time; 
     }
 }
-
-// 去畸变    对齐到帧的第一个点坐标  
-// void FrontEndEstimator::LaserUndistorted(msa2d::sensor::LaserPointCloud::Ptr& laser, 
-//                                                                                            Path& motion_info) {
-//     if (motion_info.size() == 0) {
-//         return;  
-//     }
-//     // 将odom系下的path转换到lidar系
-//     for (auto& it : motion_info) {
-//         poseOdomToPrimeLaserOdom(it.pose_, it.pose_);  
-//     }
-//     msa2d::Pose2d begin_pose = motion_info.front().pose_;     // T_begin<-end
-//     // 相邻的两个motion数据  靠近motion_info.back() 为 front ,靠近 motion_info.front() 的为 back 
-//     msa2d::Pose2d front_relate_begin_pose; // 相对与 激光最后一个点坐标系的pose 初始化为0 
-//     msa2d::Pose2d back_relate_begin_pose; // 相对与 激光最后一个点坐标系的pose 初始化为0 
-//     // 处理时path中pose的时间因该是相对于该帧起始时间的
-//     double part_front_time =  0;
-//     double part_back_time = 0; 
-//     msa2d::Pose2d point_pose; // 每个激光点对应的雷达Pose 
-//     int16_t ptr = 0;   
-//     int16_t num = laser->pointcloud_.size();  
-//     //   back -------------> front
-//     for (uint16_t i = 1; i < motion_info.size(); ++i) {
-//         back_relate_begin_pose = begin_pose.inv() * motion_info[i].pose_;  //T_end<-curr = T_end<-begin * T_begin<-curr
-//         // msa2d::Pose2d P_sc = begin_pose * back_relate_begin_pose;
-
-//         part_back_time = motion_info[i].time_stamp_ - motion_info.front().time_stamp_;
-//         // std::cout << "curr_motion: " << motion_info[i].pose_.vec().transpose() << std::endl;
-//         // std::cout << "P_sc: " << P_sc.vec().transpose() << std::endl;
-//         // std::cout << "motion_info[i - 1].pose_: " << motion_info[i - 1].pose_.vec().transpose() << std::endl;
-//         // std::cout << "i: " << i << std::endl;
-//         while (ptr < num) {
-//             if (laser->pointcloud_[ptr].rel_time_ > part_back_time) {
-//                 break;
-//             } 
-//             // if (part_front_time - laser->pointcloud_[ptr].rel_time_ < 1e-3) {
-//             //     point_pose = front_relate_begin_pose;   // 该激光点时间与part_front_time接近，因此该激光点pose就近似为front_relate_begin_pose
-//             // } else if (laser->pointcloud_[ptr].rel_time_ - part_back_time < 1e-3) {
-//             //     point_pose = back_relate_begin_pose;  // 该激光点时间与part_back_time接近，因此该激光点pose就近似为back_relate_begin_pose
-//             // } else {
-//             // 插值
-//             point_pose = util::LinearInterpolate(front_relate_begin_pose, back_relate_begin_pose, 
-//                                                                                         part_front_time, part_back_time, laser->pointcloud_[ptr].rel_time_); 
-//             // }
-//             std::cout << "point_pose vec(): " << point_pose.vec().transpose() << std::endl;
-//             // point_pose.SetRotation(-point_pose.yaw());
-//             // 将激光点观测转换到 最后一个点的坐标系   T_end<-curr * p_curr = p_end
-//             std::cout << "before pos: " << laser->pointcloud_[ptr].pos_.transpose() << std::endl;
-//             laser->pointcloud_[ptr].pos_ = point_pose * laser->pointcloud_[ptr].pos_;
-//             std::cout << "after pos: " << laser->pointcloud_[ptr].pos_.transpose() << std::endl;
-            
-//             // laser->pointcloud_[ptr].pos_.y() += 1; 
-//             ptr += 20;  
-//             // ++ptr;
-//         }
-//         if (ptr >= num) break;  
-//         // std::cout << "ptr: " << ptr << std::endl;
-//         front_relate_begin_pose = back_relate_begin_pose; 
-//         part_front_time = part_back_time; 
-//     }
-// }
 
 /**
  * @brief 系统初始话
