@@ -70,6 +70,8 @@ private:
         double time_increment_;  
         float laser_period_;   // 激光一帧的时间
         int laser_num_;   // 激光点的数量
+        int valid_ind_lower_;   
+        int valid_ind_upper_;
         bool laser_imaging_reversed_ = false;  // 激光雷达点云的排列和实际激光雷达旋转的方向相反
     }laser_info_;
 

@@ -1,0 +1,41 @@
+
+<launch>
+
+    <!-- 使用bag的时间戳 -->
+    <param name="use_sim_time" value="true" />
+
+    <!-- base_link to front_laser_link -->
+    <!-- <node pkg="tf" type="static_transform_publisher" name="link_broadcaster" 
+        args="0 0 0 0 0 3.1415926 base_link front_laser_link 50" /> -->
+
+    <param name="ConfigPath" value="$(find calib_fusion_2d)/config/param_dataset.yaml" />
+
+    <!-- 启动 hector_slam  -->
+    <node pkg="calib_fusion_2d" type="slam2d_node" name="slam2d_node" output="screen">
+        <param name="pub_map_baselink_tf" value="false"/>
+        <param name="pub_map_odom_tf" value="false"/>
+        <param name="pub_odometry_topic" value="true"/>
+        <param name="tracking_frame" value="base_link"/>
+
+        <param name="scan_topic" value="laser_scan"/>
+        <param name="wheel_topic" value="odomq"/>
+        <param name="imu_topic" value="imu"/>
+        <param name="scan_frame" value="front_laser_link"/>
+        <param name="use_max_scan_range" value="20"/>
+        <param name="laser_min_dist" value="0.2"/>
+        <param name="laser_max_dist" value="30"/>
+        <param name="laser_imaging_reversed" value="true"/>      
+
+        <param name="map_pub_period" value="2"/>
+        <param name="map_resolution" value="0.05"/>
+        <param name="map_multi_res_levels" value="３"/>
+
+        <param name="map_update_distance_thresh" value="0.4"/>
+        <param name="map_update_angle_thresh" value="0.78"/>
+    </node>
+    
+    <!-- launch rviz -->
+    <node name="rviz" pkg="rviz" type="rviz" required="true"
+        args="-d $(find calib_fusion_2d)/config/slam.rviz" />
+
+</launch>

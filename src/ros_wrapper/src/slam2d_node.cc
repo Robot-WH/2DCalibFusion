@@ -264,12 +264,17 @@ void RosWrapper::scanCallback(const sensor_msgs::LaserScan &scan) {
         laser_info_.laser_period_ = laser_info_.time_increment_ * laser_info_.laser_num_;  
         laser_info_.index_cos_.clear();
         laser_info_.index_sin_.clear();
+        double angle = scan.angle_min; 
 
         for (unsigned int i = 0; i < scan.ranges.size(); i++) {
-            double angle = scan.angle_min + i * scan.angle_increment;
             laser_info_.index_cos_.push_back(cos(angle));
             laser_info_.index_sin_.push_back(sin(angle));
+            angle += scan.angle_increment;
         }
+        // 靠近起始和终止位置附近处的点不要  (+-25) 
+        laser_info_.valid_ind_lower_ = 0.4363 / scan.angle_increment;
+        laser_info_.valid_ind_upper_ = scan.ranges.size() - 1 - laser_info_.valid_ind_lower_; 
+
         scan_init = true; 
         std::cout << "激光点数量: " << laser_info_.laser_num_ << std::endl
         << "激光角度分辨率: " << laser_info_.angle_increment_ * 180 / 3.1415926<< std::endl 
@@ -520,6 +525,8 @@ bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan
         laser.end_time_ = laser.start_time_ + laser.pointcloud_.back().rel_time_;  
     } else {
         for (int i = last_index; i >= 0; --i) {
+            // if (i > laser_info_.valid_ind_upper_) continue;
+            if (i < 2 * laser_info_.valid_ind_lower_) continue;
             // 距离滤波 
             if (!std::isfinite(scan_msg.ranges[i]) ||
                 scan_msg.ranges[i] < laser_min_dist_ ||
