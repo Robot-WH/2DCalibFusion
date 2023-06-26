@@ -39,6 +39,7 @@ RosWrapper::RosWrapper() : private_node_("~"), lastGetMapUpdateIndex(-100) {
     tf_base_to_odom_ = new tf::TransformBroadcaster();
     tf_laser_to_base_ = new tf::TransformBroadcaster();
     tf_laserOdom_to_odom_ = new tf::TransformBroadcaster();  
+    tf_global_pose_ = new tf::TransformBroadcaster();  
     // 外参初始化
     ext_prime_laser_to_odom_.setZero(); 
     //订阅融合的里程计结果 
@@ -47,6 +48,13 @@ RosWrapper::RosWrapper() : private_node_("~"), lastGetMapUpdateIndex(-100) {
                                                                                                     this, 
                                                                                                     5,
                                                                                                     true);  // 高优先级
+    
+    ::util::DataDispatcher::GetInstance().Subscribe("global_pose", 
+                                                                                                &RosWrapper::GlobalPoseCallback, 
+                                                                                                this, 
+                                                                                                5,
+                                                                                                true);  // 高优先级
+
     // 订阅激光和odom的外参回调
     ::util::DataDispatcher::GetInstance().Subscribe("lidarOdomExt", 
                                                                                                     &RosWrapper::lidarOdomExtransicCallback, 
@@ -284,7 +292,7 @@ void RosWrapper::scanCallback(const sensor_msgs::LaserScan &scan) {
     } 
     // start_time_ = std::chrono::steady_clock::now();
     // 将 scan 转换成 点云格式
-    msa2d::sensor::LaserPointCloud::ptr laser_ptr(new msa2d::sensor::LaserPointCloud());
+    msa2d::sensor::LaserScan::ptr laser_ptr(new msa2d::sensor::LaserScan());
     // 将雷达数据的点云格式 更改成 hector 内部的数据格式
     if (rosPointCloudToDataContainer(scan, *laser_ptr)) {
         // 进入扫描匹配与地图更新
@@ -331,6 +339,12 @@ void RosWrapper::FusionOdomResultCallback(const msa2d::TimedPose2d& data) {
                                                 // ros::Time::now(),
                                                 baseFrame_name_, 
                                                 primeLaserFrame_name_));
+
+    tf_global_pose_->sendTransform(tf::StampedTransform(RosUtils::GetTFTransform(global_pose_msg_), 
+                                    ros::Time(data.time_stamp_), 
+                                    // ros::Time::now(),
+                                    laserOdomFrame_name_, 
+                                    "global_pose"));
     // 发布 odom topic
     if (p_pub_odometry_) {
         nav_msgs::Odometry tmp;
@@ -341,6 +355,14 @@ void RosWrapper::FusionOdomResultCallback(const msa2d::TimedPose2d& data) {
         // tmp.child_frame_id = baseFrame_name_;
         odometryPublisher_.publish(tmp);
     }
+}
+
+void RosWrapper::GlobalPoseCallback(const msa2d::Pose2d& pose) {
+        global_pose_msg_.position.x = pose.x();
+        global_pose_msg_.position.y = pose.y();
+
+        global_pose_msg_.orientation.w = cos(pose.yaw() * 0.5f);
+        global_pose_msg_.orientation.z = sin(pose.yaw() * 0.5f);
 }
 
 void RosWrapper::lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 1>& ext) {
@@ -363,7 +385,7 @@ void RosWrapper::wheelOdomDeadReckoningCallback(const msa2d::TimedPose2d& pose) 
 }
 
 // 接收到去畸变的点云
-void RosWrapper::undistortedPointcloudCallback(const msa2d::sensor::LaserPointCloud& data) {
+void RosWrapper::undistortedPointcloudCallback(const msa2d::sensor::LaserScan& data) {
     // std::cout << common::GREEN << "send undistortedPointcloud ----------------------------" 
     // << common::RESET << std::endl;
     sensor_msgs::PointCloud pointcloud_msg;
@@ -377,10 +399,10 @@ void RosWrapper::undistortedPointcloudCallback(const msa2d::sensor::LaserPointCl
         point.z = 0;
         pointcloud_msg.points.push_back(point);
     }
-    // pointcloud_msg.header.stamp = ros::Time(data.end_time_); 
-    pointcloud_msg.header.stamp = ros::Time(data.start_time_); 
+    pointcloud_msg.header.stamp = ros::Time(data.end_time_); 
+    // pointcloud_msg.header.stamp = ros::Time(data.start_time_); 
     // pointcloud_msg.header.stamp = ros::Time::now(); 
-    pointcloud_msg.header.frame_id = primeLaserFrame_name_;
+    pointcloud_msg.header.frame_id = "global_pose";
     undistorted_pointcloud_publisher_.publish(pointcloud_msg);
 }
 
@@ -498,7 +520,7 @@ void RosWrapper::localMapCallback(const std::vector<Eigen::Vector2f>& data) {
 
 
 bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan_msg, 
-                                                                                                                        msa2d::sensor::LaserPointCloud& laser) {
+                                                                                                           msa2d::sensor::LaserScan& laser) {
     size_t size = scan_msg.ranges.size();
     size_t last_index = size - 1; 
     laser.pointcloud_.reserve(size);
@@ -526,7 +548,7 @@ bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan
     } else {
         for (int i = last_index; i >= 0; --i) {
             // if (i > laser_info_.valid_ind_upper_) continue;
-            if (i < 2 * laser_info_.valid_ind_lower_) continue;
+            // if (i < 2 * laser_info_.valid_ind_lower_) continue;
             // 距离滤波 
             if (!std::isfinite(scan_msg.ranges[i]) ||
                 scan_msg.ranges[i] < laser_min_dist_ ||
@@ -553,14 +575,14 @@ bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan
 // 对ROS地图进行数据初始化与分配内存
 void RosWrapper::setMapInfo(nav_msgs::GetMap::Response& map_, 
         const msa2d::map::OccGridMapBase* gridMap) {
-    Eigen::Vector2f mapOrigin(gridMap->getGridMapBase().getWorldCoords(Eigen::Vector2f::Zero()));   // Map原点的world坐标
+    Eigen::Vector2f mapOrigin(gridMap->getGridMapBase().PosMapToWorldf(Eigen::Vector2f::Zero()));   // Map原点的world坐标
 
     map_.map.info.origin.position.x = mapOrigin.x();
     map_.map.info.origin.position.y = mapOrigin.y();
     map_.map.info.origin.orientation.w = 1.0;
-    map_.map.info.resolution = gridMap->getGridMapBase().getCellLength();
-    map_.map.info.width = gridMap->getGridMapBase().getSizeX();
-    map_.map.info.height = gridMap->getGridMapBase().getSizeY();
+    map_.map.info.resolution = gridMap->getGridMapBase().getGridResolution();
+    map_.map.info.width = gridMap->getGridMapBase().getGridSizeX();
+    map_.map.info.height = gridMap->getGridMapBase().getGridSizeY();
 
     map_.map.header.frame_id = laserOdomFrame_name_;    // 设置map的参考坐标系  
     // 分配内存空间
@@ -587,8 +609,8 @@ void RosWrapper::publishMap(MapPublisherContainer& mapPublisher,
     nav_msgs::GetMap::Response& map_(mapPublisher.map_);
     //only update map if it changed
     if (lastGetMapUpdateIndex != gridMap->getGridMapBase().getUpdateIndex()) {
-        int sizeX = gridMap->getGridMapBase().getSizeX();
-        int sizeY = gridMap->getGridMapBase().getSizeY();
+        int sizeX = gridMap->getGridMapBase().getGridSizeX();
+        int sizeY = gridMap->getGridMapBase().getGridSizeY();
         int size = sizeX * sizeY;
         std::vector<int8_t> &data = map_.map.data;
         //std::vector contents are guaranteed to be contiguous, use memset to set all to unknown to save time in loop
@@ -606,7 +628,7 @@ void RosWrapper::publishMap(MapPublisherContainer& mapPublisher,
         }
 
         lastGetMapUpdateIndex = gridMap->getGridMapBase().getUpdateIndex();
-        Eigen::Vector2f mapOrigin(gridMap->getGridMapBase().getWorldCoords(Eigen::Vector2f::Zero()));   // Map原点的world坐标
+        Eigen::Vector2f mapOrigin(gridMap->getGridMapBase().PosMapToWorldf(Eigen::Vector2f::Zero()));   // Map原点的world坐标
 
         map_.map.info.origin.position.x = mapOrigin.x();
         map_.map.info.origin.position.y = mapOrigin.y();

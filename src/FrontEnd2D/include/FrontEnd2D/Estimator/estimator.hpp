@@ -17,6 +17,7 @@
 // #include "../Map/OccGridMapUtilConfig.h"
 #include "msa2d/Sensor/LaserPointContainer.h"
 #include "msa2d/Sensor/SensorData.hpp"
+#include "msa2d/Sensor/point_cloud.hpp"
 #include "msa2d/ScanMatcher/hectorScanMatcher.h"
 
 namespace Estimator2D {
@@ -29,7 +30,7 @@ public:
         delete grid_map_pyramid_;
     }
 
-    void InputLaser(msa2d::sensor::LaserPointCloud::ptr& laser_ptr);
+    void InputLaser(msa2d::sensor::LaserScan::ptr& laser_ptr);
 
     void InputWheelOdom(msa2d::sensor::WheelOdom& data);
 
@@ -67,7 +68,7 @@ protected:
      * @param occGridMap 栅格工具  
      * @return {*}
      */    
-    bool fastPredictFailureDetection(const msa2d::sensor::LaserPointCloud::Ptr& laser_ptr, 
+    bool fastPredictFailureDetection(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
                                                             const msa2d::Pose2d& pose, 
                                                             const msa2d::map::OccGridMapBase* occGridMap);
 
@@ -81,12 +82,16 @@ protected:
      * @param[out] undetermined_points 待定点  即击中未知栅格以及击中占据概率高与阈值的空白栅格的点
      * @return {*}
      */    
-    void pointClassification(const msa2d::sensor::LaserPointCloud::Ptr& laser_ptr, 
+    void pointClassification(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
                                                             const msa2d::Pose2d& pose, 
                                                             const msa2d::map::OccGridMapBase* occGridMap,
                                                             std::vector<Eigen::Vector2f>& dynamic_points,
                                                             std::vector<Eigen::Vector2f>& stable_points,
                                                             std::vector<Eigen::Vector2f>& undetermined_points);
+
+    bool judgeTrackingLoss(const std::vector<Eigen::Vector2f>& dynamic_points,
+                                                        const std::vector<Eigen::Vector2f>& stable_points,
+                                                        const std::vector<Eigen::Vector2f>& undetermined_points);
 
     /**
      * @brief 激光畸变去除
@@ -94,7 +99,7 @@ protected:
      * @param laser 
      * @param motion_info 
      */
-    void LaserUndistorted(msa2d::sensor::LaserPointCloud& laser, Path& motion_info); 
+    void LaserUndistorted(msa2d::sensor::LaserScan& laser, Path& motion_info); 
 
     /**
      * @brief: 
@@ -112,7 +117,7 @@ protected:
      *                    false: 当存在除了激光雷达外的传感器数据，且该传感器最后数据的时间戳要早于
      *                                激光末尾时间戳，则返回false，延迟该激光帧的处理时间，等待其他传感器数据覆盖。
      */    
-    bool syncSensorData(const msa2d::sensor::LaserPointCloud::Ptr& laser_ptr, 
+    bool syncSensorData(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
                                                 std::deque<msa2d::sensor::WheelOdom>& wheelOdom_container,
                                                 std::deque<msa2d::sensor::ImuData>& imu_container);
     /**
@@ -147,7 +152,7 @@ protected:
      *                                             实际观测位置和该点云坐标原点重和  
      * @return {*}
      */    
-    void getLaserPyramidData(const msa2d::sensor::LaserPointCloud& pointcloud);
+    void getLaserPyramidData(const msa2d::sensor::LaserScan& pointcloud);
 
     float getScaleToMap() const { return grid_map_pyramid_->getScaleToMap(); };    // 返回第 0层的scale  
 
@@ -165,6 +170,7 @@ private:
     bool imu_initialized_ = false;
     bool has_odomExtrinsicParam_ = true; 
     bool imu_calib_ = false;  
+    bool track_loss_ = false;    // 位姿丢失
     Eigen::Isometry2f primeLaserOdomExtrinsic_;  
     // Eigen::Isometry3f primeLaserOdomExtrinsic_;  
     msa2d::Pose2d last_map_updata_pose_;
@@ -179,7 +185,7 @@ private:
 
     std::deque<msa2d::sensor::WheelOdom> wheelOdom_cache_;  
     std::deque<msa2d::sensor::ImuData> imu_cache_;  
-    std::deque<msa2d::sensor::LaserPointCloud::Ptr> laser_cache_;   
+    std::deque<msa2d::sensor::LaserScan::Ptr> laser_cache_;   
 
     std::shared_mutex wheel_sm_;  
     std::shared_mutex imu_sm_;  

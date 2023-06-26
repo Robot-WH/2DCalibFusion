@@ -35,7 +35,7 @@
     </node>
     
     <!-- launch rviz -->
-    <node name="rviz" pkg="rviz" type="rviz" required="true"
-        args="-d $(find calib_fusion_2d)/config/slam.rviz" />
+    <!-- <node name="rviz" pkg="rviz" type="rviz" required="true"
+        args="-d $(find calib_fusion_2d)/config/slam.rviz" /> -->
 
 </launch>

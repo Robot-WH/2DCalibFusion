@@ -26,6 +26,7 @@
 #include "FrontEnd2D/Estimator/estimator.hpp"
 #include "msa2d/Sensor/LaserPointContainer.h"
 #include "msa2d/Sensor/SensorData.hpp"
+#include "msa2d/Sensor/point_cloud.hpp"
 #include "FrontEnd2D/util/DataDispatcher.hpp"
 
 
@@ -45,9 +46,10 @@ public:
     void wheelOdomCallback(const nav_msgs::Odometry &odom);
     void imuCallback(const sensor_msgs::Imu &imu);
     void FusionOdomResultCallback(const msa2d::TimedPose2d& data);
+    void GlobalPoseCallback(const msa2d::Pose2d& pose);
     void lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 1>& ext);
     void wheelOdomDeadReckoningCallback(const msa2d::TimedPose2d& pose);
-    void undistortedPointcloudCallback(const msa2d::sensor::LaserPointCloud& data);
+    void undistortedPointcloudCallback(const msa2d::sensor::LaserScan& data);
     void dynamicPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
     void stablePointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
     void undeterminedPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
@@ -61,7 +63,7 @@ private:
         ros::Time timestamp, std::mutex* mapMutex);
     void publishTFLoop(double pub_period);
     bool rosPointCloudToDataContainer(const sensor_msgs::LaserScan &scan_msg, 
-                                                                                msa2d::sensor::LaserPointCloud& pointCloud);
+                                                                                msa2d::sensor::LaserScan& pointCloud);
 
     struct LaserInfo {
         std::vector<double> index_cos_; // 保存下来雷达各个角度的cos值
@@ -93,8 +95,10 @@ private:
     tf::TransformBroadcaster *tf_base_to_odom_;
     tf::TransformBroadcaster *tf_laser_to_base_;
     tf::TransformBroadcaster *tf_laserOdom_to_odom_;
+    tf::TransformBroadcaster * tf_global_pose_;
     tf::Transform map_to_odom_;
     tf::StampedTransform laserTransform_;
+    geometry_msgs::Pose global_pose_msg_;
     laser_geometry::LaserProjection projector_;
     sensor_msgs::PointCloud laser_point_cloud_; // 点云格式的雷达数据
 

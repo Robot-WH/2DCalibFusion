@@ -65,12 +65,12 @@ Visualization Manager:
       Class: rviz/Map
       Color Scheme: map
       Draw Behind: true
-      Enabled: false
+      Enabled: true
       Name: Map
       Topic: /map
       Unreliable: false
       Use Timestamp: false
-      Value: false
+      Value: true
     - Class: rviz/Axes
       Enabled: false
       Length: 0.6000000238418579
@@ -251,23 +251,15 @@ Visualization Manager:
         All Enabled: false
         base:
           Value: true
-        base_footprint:
-          Value: true
         base_link:
           Value: true
-        camera_link:
-          Value: true
-        front_wheel_link:
-          Value: true
-        gyro_link:
-          Value: true
-        laser:
+        footprint:
           Value: true
         laserOdom:
           Value: false
-        laser_frame:
-          Value: true
         left_wheel_link:
+          Value: true
+        map:
           Value: true
         odom:
           Value: false
@@ -281,12 +273,15 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        odom:
-          base:
-            primeLaser_link:
+        map:
+          odom:
+            base:
+              primeLaser_link:
+                {}
+            footprint:
               {}
-          laserOdom:
-            {}
+            laserOdom:
+              {}
       Update Interval: 0
       Value: true
     - Alpha: 1
@@ -436,7 +431,7 @@ Visualization Manager:
   Value: true
   Views:
     Current:
-      Angle: -1.979998230934143
+      Angle: -0.004999966360628605
       Class: rviz/TopDownOrtho
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
@@ -446,7 +441,7 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 137.39532470703125
+      Scale: 10.656763076782227
       Target Frame: base
       Value: TopDownOrtho (rviz)
       X: -1.611440658569336

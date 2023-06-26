@@ -1,5 +1,6 @@
 #include <iomanip> 
 #include "FrontEnd2D/Estimator/estimator.hpp"
+#include "msa2d/ScanMatcher/fast_correlative_scan_matcher_2d.h"
 
 namespace Estimator2D {
 
@@ -65,7 +66,7 @@ FrontEndEstimator::FrontEndEstimator(const std::string& config_path) {
  * 
  * @param laser_ptr 
  */
-void FrontEndEstimator::InputLaser(msa2d::sensor::LaserPointCloud::ptr& laser_ptr) {
+void FrontEndEstimator::InputLaser(msa2d::sensor::LaserScan::ptr& laser_ptr) {
     laser_sm_.lock();   // 写锁
     laser_cache_.push_back(std::move(laser_ptr));
     laser_sm_.unlock(); 
@@ -146,6 +147,46 @@ void FrontEndEstimator::run() {
                     }
                 }
                 wait_time = 0; 
+                // 如果位姿丢失   需要重定位 
+                // 重定位失败则新建一个轨迹  
+                if (track_loss_) {
+                    std::cout << msa2d::color::RED << "tracking loss !!!!" << 
+                        msa2d::color::RESET << std::endl;
+                    // 判断是否静止
+
+                    // laser_sm_.lock();
+                    // laser_cache_.pop_front();  
+                    // laser_sm_.unlock();  
+                    // wheel_odom_selected.clear(); 
+                    // imu_selected.clear();  
+                    // continue;  
+                }
+
+                static int global_match_time = 0;  
+                if (global_match_time == 10) {
+                    msa2d::ScanMatcher::FastCorrelativeScanMatcherOptions2D fcsm_option;
+                    // msa2d::ScanMatcher::PrecomputationGridStack2D  pre_grid_stack(grid_map_pyramid_->getGridMap(0), fcsm_option);
+                    
+                    // for (int h = 0; h <= pre_grid_stack.max_depth(); ++h) {
+                    // // for (int h = 0; h <= 0; ++h) {
+                    //     cv::Mat map_img = pre_grid_stack.Get(h).ToImage();
+                    //     cv::imshow("map_" + std::to_string(h), map_img);
+                    //     cv::waitKey(10);  
+                    // }
+                    msa2d::ScanMatcher::FastCorrelativeScanMatcher2D global_matcher(grid_map_pyramid_->getGridMap(0), fcsm_option);
+                    float score = 0.f;
+                    msa2d::Pose2d global_pose_estimate;
+                    global_matcher.MatchFullSubmap(curr_laser_ptr->pointcloud_, 0, score, global_pose_estimate); 
+                    // std::cout << "score: " << score << ", global_pose_estimate x: " << global_pose_estimate.x()
+                    //     << ", y: " << global_pose_estimate.y() << ",yaw: " << global_pose_estimate.yaw() << std::endl; 
+                    global_pose_estimate.SetVec(
+                        grid_map_pyramid_->getGridMap(0)->getGridMapBase().PoseMapToWorld(global_pose_estimate.vec()));
+                    std::cout << "global_pose_estimate: " << global_pose_estimate.vec().transpose() << std::endl;
+                    global_match_time = 0;  
+                    ::util::DataDispatcher::GetInstance().Publish("global_pose", global_pose_estimate); 
+                    ::util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", *curr_laser_ptr); 
+                }
+                global_match_time++; 
                 /**
                  * @brief 进行EKF预测   
                  * aser-imu-wheel模式： imu预测+laser&wheel校正
@@ -220,7 +261,6 @@ void FrontEndEstimator::run() {
                 if (imu_calib_) {
                     LaserUndistorted(*curr_laser_ptr, diff_model.GetPath());// 去除laser的畸变
                 }
-                // ::util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", *curr_laser_ptr); 
                 msa2d::Pose2d estimated_odom_pose = last_fusionOdom_pose_.pose_ * predict_incre_pose;   // To<-last * Tlast<-curr
                 // 将odom系下的预测位姿转换到laser odom下
                 msa2d::Pose2d new_estimate_laserOdom_pose;
@@ -234,18 +274,19 @@ void FrontEndEstimator::run() {
                 TicToc tt; 
                 new_estimate_laserOdom_pose.SetVec(hector_matcher_->Solve(new_estimate_laserOdom_pose.vec(), 
                     laser_pyramid_container_, *grid_map_pyramid_, lastScanMatchCov)); 
-                // std::cout << "laserOdom_pose: " << new_estimate_laserOdom_pose.vec().transpose() << std::endl;
+                std::cout << "laserOdom_pose: " << new_estimate_laserOdom_pose.vec().transpose() << std::endl;
                 // 细匹配  ICP / NDT 
                 tt.toc("match solve");
                 // 将pose转换到odom系下
                 posePrimeLaserToOdom(new_estimate_laserOdom_pose, estimated_odom_pose);
-                // std::cout << "Odom_pose: " << estimated_odom_pose.vec().transpose() << std::endl;
+                std::cout << "Odom_pose: " << estimated_odom_pose.vec().transpose() << std::endl;
                 // msa2d::Pose2d scan_matched_incre_pose = last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
                 // std::cout << msa2d::color::YELLOW << "scan_matched_incre_pose: " << scan_matched_incre_pose.vec().transpose()
                 //     << msa2d::color::RESET << std::endl;
                 // 校准IMU
                 if (!imu_calib_) {
-                    msa2d::Pose2d scan_matched_incre_pose = last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
+                    msa2d::Pose2d scan_matched_incre_pose = 
+                        last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
                     if (std::fabs(predict_incre_pose.yaw()) > 0.02) {
                         float t = predict_incre_pose.yaw() * scan_matched_incre_pose.yaw();
                         if (t < 0) {
@@ -268,6 +309,13 @@ void FrontEndEstimator::run() {
                     // 更新对应laser坐标
                     poseOdomToPrimeLaserOdom(estimated_odom_pose, new_estimate_laserOdom_pose);
                 }
+                // 系统初始化是指 联合imu和wheel的多传感器初始化
+                // 系统初始化只要有imu或wheel两者之一就可以，系统初始化后，
+                // 即使之后出现新的传感器数据，也不会重新初始化
+                if (!system_initialized_) {
+                    systemInit(new_estimate_laserOdom_pose, imu_selected, wheel_odom_selected, curr_laser_ptr->end_time_);
+                }
+
                 // 利用栅格金子塔进行点云分类
                 std::pair<std::vector<Eigen::Vector2f>, double> dynamic_points_data;    // 动态点
                 std::pair<std::vector<Eigen::Vector2f>, double>  stable_points_data;   // 静态点 
@@ -281,18 +329,13 @@ void FrontEndEstimator::run() {
                 undetermined_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());  
                 undetermined_points_data.second = curr_laser_ptr->end_time_; 
                 //  将激光点从激光坐标系转到laserOdom系 
-                for (auto& point : curr_laser_ptr->pointcloud_) {
+                for (auto& point : curr_laser_ptr->pointcloud_.points()) {
                     point.pos_ = new_estimate_laserOdom_pose * point.pos_;      //  转到laserOdom系 
                 }
 
-                pointClassification(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(2), 
+                pointClassification(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(0), 
                     dynamic_points_data.first, stable_points_data.first, undetermined_points_data.first);
-                // 系统初始化是指 联合imu和wheel的多传感器初始化
-                // 系统初始化只要有imu或wheel两者之一就可以，系统初始化后，
-                // 即使之后出现新的传感器数据，也不会重新初始化
-                if (!system_initialized_) {
-                    systemInit(new_estimate_laserOdom_pose, imu_selected, wheel_odom_selected, curr_laser_ptr->end_time_);
-                }
+
                 last_fusionOdom_pose_.pose_ = estimated_odom_pose;
                 last_fusionOdom_pose_.time_stamp_ = curr_laser_ptr->end_time_; 
                 // last_fusionOdom_pose_.time_stamp_ = curr_laser_ptr->start_time_; 
@@ -302,14 +345,18 @@ void FrontEndEstimator::run() {
                 ::util::DataDispatcher::GetInstance().Publish("stable_pointcloud", stable_points_data); 
                 ::util::DataDispatcher::GetInstance().Publish("local_map", local_map_.ReadLocalMap()); 
 
-                /** 2.地图更新(last_map_updata_pose_初始化为一个很大的值，因此第一帧点云就会更新地图) **/
-                if (msa2d::module::poseDifferenceLargerThan(new_estimate_laserOdom_pose.vec(), last_map_updata_pose_.vec(), 
-                        paramMinDistanceDiffForMapUpdate, paramMinAngleDiffForMapUpdate)) { 
-                    // 仅在位姿变化大于阈值 或者 map_without_matching为真 的时候进行地图更新
-                    grid_map_pyramid_->updateByScan(laser_pyramid_container_, new_estimate_laserOdom_pose.vec());
-                    grid_map_pyramid_->onMapUpdated();
-                    local_map_.UpdateLocalMapForMotion(stable_points_data.first);
-                    last_map_updata_pose_ = new_estimate_laserOdom_pose;
+                // 判断位姿是否丢失
+                if (!track_loss_ && !judgeTrackingLoss(dynamic_points_data.first, stable_points_data.first, 
+                                                                undetermined_points_data.first)) {
+                    /** 2.地图更新(last_map_updata_pose_初始化为一个很大的值，因此第一帧点云就会更新地图) **/
+                    if (msa2d::module::poseDifferenceLargerThan(new_estimate_laserOdom_pose.vec(), last_map_updata_pose_.vec(), 
+                            paramMinDistanceDiffForMapUpdate, paramMinAngleDiffForMapUpdate)) { 
+                        // 仅在位姿变化大于阈值 或者 map_without_matching为真 的时候进行地图更新
+                        grid_map_pyramid_->updateByScan(laser_pyramid_container_, new_estimate_laserOdom_pose.vec());
+                        grid_map_pyramid_->onMapUpdated();
+                        local_map_.UpdateLocalMapForMotion(stable_points_data.first);
+                        last_map_updata_pose_ = new_estimate_laserOdom_pose;
+                    }
                 }
 
                 laser_sm_.lock();
@@ -333,7 +380,7 @@ void FrontEndEstimator::run() {
  * @return true 
  * @return false 
  */
-bool FrontEndEstimator::fastPredictFailureDetection(const msa2d::sensor::LaserPointCloud::Ptr& laser_ptr, 
+bool FrontEndEstimator::fastPredictFailureDetection(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
                                                                                                                 const msa2d::Pose2d& pose, 
                                                                                                                 const msa2d::map::OccGridMapBase* occGridMap) {
     uint16_t laser_num = laser_ptr->pointcloud_.size();
@@ -348,7 +395,7 @@ bool FrontEndEstimator::fastPredictFailureDetection(const msa2d::sensor::LaserPo
 
     for (float curr_point = 0; curr_point < laser_num - 1; curr_point += incre_step ) {
         Eigen::Vector2f point_laserOdom_pos = pose * laser_ptr->pointcloud_[int(curr_point)].pos_;     
-        Eigen::Vector2f point_gridmap_pos = occGridMap->getGridMapBase().getMapCoords(point_laserOdom_pos);     // laserOdom -> map
+        Eigen::Vector2f point_gridmap_pos = occGridMap->getGridMapBase().PosWorldToMapf(point_laserOdom_pos);     // laserOdom -> map
 
         if (!occGridMap->getGridMapBase().pointOutOfMapBounds(point_gridmap_pos)) {
             if (occGridMap->isOccupied(round(point_gridmap_pos[0]), round(point_gridmap_pos[1]))) {
@@ -377,14 +424,14 @@ bool FrontEndEstimator::fastPredictFailureDetection(const msa2d::sensor::LaserPo
  * @param stable_points 
  * @param undetermined_points 
  */
-void FrontEndEstimator::pointClassification(const msa2d::sensor::LaserPointCloud::Ptr& laser_ptr, 
+void FrontEndEstimator::pointClassification(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
                                                                                             const msa2d::Pose2d& pose, 
                                                                                             const msa2d::map::OccGridMapBase* occGridMap,
                                                                                             std::vector<Eigen::Vector2f>& dynamic_points,
                                                                                             std::vector<Eigen::Vector2f>& stable_points,
                                                                                             std::vector<Eigen::Vector2f>& undetermined_points) {
     for (auto& point : laser_ptr->pointcloud_) {
-        Eigen::Vector2f point_gridmap_pos = occGridMap->getGridMapBase().getMapCoords(point.pos_);     // laserOdom -> map
+        Eigen::Vector2f point_gridmap_pos = occGridMap->getGridMapBase().PosWorldToMapf(point.pos_);     // laserOdom -> map
         // 超过范围的点一律丢掉
         if (occGridMap->getGridMapBase().pointOutOfMapBounds(point_gridmap_pos)) {
             continue;      
@@ -411,12 +458,52 @@ void FrontEndEstimator::pointClassification(const msa2d::sensor::LaserPointCloud
 }
 
 /**
+ * @brief 判断位姿是否的丢失 
+ *                  判断动态点和未知点是否突然增多，如果增加的比例大于阈值，那么认为位姿跟踪丢失 
+ * @param dynamic_points 
+ * @return true 位姿丢失
+ * @return false  位姿良好
+ */
+bool FrontEndEstimator::judgeTrackingLoss(const std::vector<Eigen::Vector2f>& dynamic_points,
+                                                                                            const std::vector<Eigen::Vector2f>& stable_points,
+                                                                                            const std::vector<Eigen::Vector2f>& undetermined_points) {
+    static float last_track_quality_factor = -1;
+    float curr_track_quality_factor = (float)stable_points.size() / (dynamic_points.size() + undetermined_points.size()); 
+    // std::cout << "dynamic_points size: " << dynamic_points.size() <<
+    //     "stable_points size: " << stable_points.size() << 
+    //     "undetermined_points size: " << undetermined_points.size() << std::endl;
+    // 初始化
+    if (last_track_quality_factor < 0) {
+        if (stable_points.size() == 0) {
+            return false;  
+        }
+        // 点的质量必须要良好才能初始化
+        if (curr_track_quality_factor > 1) { 
+            last_track_quality_factor = curr_track_quality_factor;
+            return false;
+        } else {
+            track_loss_ = true;
+            return true;  
+        }
+    }
+    std::cout << "last_track_quality_factor: " << last_track_quality_factor << ",curr_track_quality_factor: "
+        << curr_track_quality_factor << std::endl;
+    // 质量
+    if (curr_track_quality_factor < last_track_quality_factor * 0.1) {
+        track_loss_ = true;  
+        return true; 
+    }
+    last_track_quality_factor = curr_track_quality_factor;
+    return false;
+}
+
+/**
  * @brief 根据运动信息去除激光点云的畸变  
  * 
  * @param laser 
  * @param motion_info 该激光帧时间范围内的运行信息  但是这是odom系下的运动信息
  */
-void FrontEndEstimator::LaserUndistorted(msa2d::sensor::LaserPointCloud& laser, 
+void FrontEndEstimator::LaserUndistorted(msa2d::sensor::LaserScan& laser, 
                                                                                            Path& motion_info) {
     if (motion_info.size() == 0) {
         return;  
@@ -453,7 +540,7 @@ void FrontEndEstimator::LaserUndistorted(msa2d::sensor::LaserPointCloud& laser,
                                                                                             part_front_time, part_back_time, laser.pointcloud_[ptr].rel_time_); 
             }
             // 将激光点观测转换到 最后一个点的坐标系   T_end<-curr * p_curr = p_end
-            laser.pointcloud_[ptr].pos_ = point_pose * laser.pointcloud_[ptr].pos_;
+            laser.pointcloud_.points()[ptr].pos_ = point_pose * laser.pointcloud_.points()[ptr].pos_;
             --ptr;
         }
         if (ptr < 0) break;  
@@ -521,7 +608,7 @@ void FrontEndEstimator::systemInit(const msa2d::Pose2d& laser_pose,
  * @return true 
  * @return false 
  */
-bool FrontEndEstimator::syncSensorData(const msa2d::sensor::LaserPointCloud::Ptr& laser_ptr, 
+bool FrontEndEstimator::syncSensorData(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
                                                                                         std::deque<msa2d::sensor::WheelOdom>& wheelOdom_container,
                                                                                         std::deque<msa2d::sensor::ImuData>& imu_container) {
     bool wheel_extract_finish = true;
@@ -672,7 +759,7 @@ void FrontEndEstimator::reset() {
  * 
  * @param pointcloud 
  */
-void FrontEndEstimator::getLaserPyramidData(const msa2d::sensor::LaserPointCloud& pointcloud) {
+void FrontEndEstimator::getLaserPyramidData(const msa2d::sensor::LaserScan& pointcloud) {
     // 第一层
     laser_pyramid_container_[0].clear(); 
     uint16_t num = pointcloud.pointcloud_.size(); 
@@ -684,7 +771,8 @@ void FrontEndEstimator::getLaserPyramidData(const msa2d::sensor::LaserPointCloud
     size_t size = grid_map_pyramid_->getMapLevels();
     for (int index = size - 1; index > 0; --index) {
         // 根据第0层地图层数，求取了在index层激光的数据
-        laser_pyramid_container_[index].setFrom(laser_pyramid_container_[0], static_cast<float>(1.0 / pow(2.0, static_cast<double>(index))));
+        laser_pyramid_container_[index].setFrom(laser_pyramid_container_[0], 
+            static_cast<float>(1.0 / pow(2.0, static_cast<double>(index))));
     }
 }
 };
