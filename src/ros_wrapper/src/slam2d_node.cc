@@ -340,11 +340,11 @@ void RosWrapper::FusionOdomResultCallback(const msa2d::TimedPose2d& data) {
                                                 baseFrame_name_, 
                                                 primeLaserFrame_name_));
 
-    tf_global_pose_->sendTransform(tf::StampedTransform(RosUtils::GetTFTransform(global_pose_msg_), 
-                                    ros::Time(data.time_stamp_), 
-                                    // ros::Time::now(),
-                                    laserOdomFrame_name_, 
-                                    "global_pose"));
+    // tf_global_pose_->sendTransform(tf::StampedTransform(RosUtils::GetTFTransform(global_pose_msg_), 
+    //                                 ros::Time(data.time_stamp_), 
+    //                                 // ros::Time::now(),
+    //                                 laserOdomFrame_name_, 
+    //                                 "global_pose"));
     // 发布 odom topic
     if (p_pub_odometry_) {
         nav_msgs::Odometry tmp;
@@ -402,7 +402,8 @@ void RosWrapper::undistortedPointcloudCallback(const msa2d::sensor::LaserScan& d
     pointcloud_msg.header.stamp = ros::Time(data.end_time_); 
     // pointcloud_msg.header.stamp = ros::Time(data.start_time_); 
     // pointcloud_msg.header.stamp = ros::Time::now(); 
-    pointcloud_msg.header.frame_id = "global_pose";
+    // pointcloud_msg.header.frame_id = "global_pose";
+    pointcloud_msg.header.frame_id = "base_link";
     undistorted_pointcloud_publisher_.publish(pointcloud_msg);
 }
 
@@ -548,7 +549,7 @@ bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan
     } else {
         for (int i = last_index; i >= 0; --i) {
             // if (i > laser_info_.valid_ind_upper_) continue;
-            // if (i < 2 * laser_info_.valid_ind_lower_) continue;
+            if (i < 2 * laser_info_.valid_ind_lower_) continue;
             // 距离滤波 
             if (!std::isfinite(scan_msg.ranges[i]) ||
                 scan_msg.ranges[i] < laser_min_dist_ ||

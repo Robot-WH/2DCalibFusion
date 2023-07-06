@@ -19,6 +19,7 @@
 #include "msa2d/Sensor/SensorData.hpp"
 #include "msa2d/Sensor/point_cloud.hpp"
 #include "msa2d/ScanMatcher/hectorScanMatcher.h"
+#include "msa2d/Filter/voxelgrid_filter.h"
 
 namespace Estimator2D {
 
@@ -193,7 +194,7 @@ private:
 
     std::unique_ptr<EKFEstimatorBase> ekf_estimator_; 
     ImuInitializer2D imu_initializer_; 
-
+    std::unique_ptr<msa2d::filter::VoxelGridFilter> voxel_filter_; 
     std::thread run_;  
 };
 }

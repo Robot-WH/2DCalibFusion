@@ -65,8 +65,7 @@ add_library(Estimator2D SHARED
   src/estimator.cpp) 
 target_link_libraries(Estimator2D PUBLIC
   yaml-cpp
-  scan_matcher_lib
-  map_lib
+  msa2d_lib
 )
 
   #############
