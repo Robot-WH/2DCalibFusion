@@ -273,11 +273,6 @@ Visualization Manager:
       Show Axes: true
       Show Names: true
       Tree:
-        base_link:
-          left_wheel_link:
-            {}
-          right_wheel_link:
-            {}
         map:
           odom:
             base:
@@ -342,8 +337,8 @@ Visualization Manager:
       Queue Size: 10
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.05000000074505806
-      Style: Flat Squares
+      Size (m): 0.5
+      Style: Spheres
       Topic: /dynamic_laser_points
       Unreliable: false
       Use Fixed Frame: true
@@ -446,11 +441,11 @@ Visualization Manager:
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Scale: 55.14838790893555
+      Scale: 29.10858154296875
       Target Frame: base
       Value: TopDownOrtho (rviz)
-      X: -0.23932971060276031
-      Y: -0.750737726688385
+      X: -1.1104859113693237
+      Y: 0.039191149175167084
     Saved: ~
 Window Geometry:
   Displays:
@@ -469,4 +464,4 @@ Window Geometry:
     collapsed: true
   Width: 1271
   X: 0
-  Y: 97
+  Y: 115

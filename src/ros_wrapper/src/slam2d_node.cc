@@ -602,7 +602,7 @@ void RosWrapper::publishMapLoop(double map_pub_period) {
         //publishMap(mapPubContainer[2],estimator_->getGridMap(2), mapTime);
         //publishMap(mapPubContainer[1],estimator_->getGridMap(1), mapTime);
         // publishMap(mapPubContainer[2], estimator_->GetGridMap(2), mapTime, estimator_->GetMapMutex(2));
-        publishMap(mapPubContainer[1], estimator_->GetGridMap(1), mapTime, estimator_->GetMapMutex(1));
+        publishMap(mapPubContainer[0], estimator_->GetGridMap(0), mapTime, estimator_->GetMapMutex(0));
         r.sleep();
     }
 }
