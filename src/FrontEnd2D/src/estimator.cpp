@@ -492,7 +492,11 @@ void FrontEndEstimator::dynamicObjectDetect(const msa2d::sensor::LaserScan::Ptr&
             if (occGridMap->isFree(grid_x + 1, grid_y) && 
                     occGridMap->isFree(grid_x - 1, grid_y) && 
                     occGridMap->isFree(grid_x, grid_y + 1) &&
-                    occGridMap->isFree(grid_x, grid_y - 1) ) {
+                    occGridMap->isFree(grid_x, grid_y - 1) &&
+                    occGridMap->isFree(grid_x + 1, grid_y + 1) &&
+                    occGridMap->isFree(grid_x - 1, grid_y - 1) &&
+                    occGridMap->isFree(grid_x + 1, grid_y - 1) &&
+                    occGridMap->isFree(grid_x - 1, grid_y + 1)) {
                 // 检测该栅格前后左右四个方向，如果都为空，则该点是动态点，若至少有一个非空，则直接忽略
                 dynamic_points.push_back(laser_ptr->pointcloud_[i].pos_);  
                 continue;  
