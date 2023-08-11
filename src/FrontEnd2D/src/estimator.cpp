@@ -76,7 +76,6 @@ void FrontEndEstimator::InputLaser(msa2d::sensor::LaserScan::ptr& laser_ptr) {
 
 /**
  * @brief 
- * 
  * @param data 
  */
 void FrontEndEstimator::InputWheelOdom(msa2d::sensor::WheelOdom& data) {
@@ -212,179 +211,199 @@ void FrontEndEstimator::run() {
                             const auto& curr_data = imu_selected[i]; 
                             // EKF预测
                             if (ekf_estimator_ != nullptr) {
-                                ekf_estimator_->Predict(curr_data.angular_v_[2], 0.25, curr_data.time_stamp_, diff_model);  
+                                ekf_estimator_->Predict(curr_data.gyro_[2], 0.25, curr_data.time_stamp_, diff_model);  
                             } else {
                                 float un_bias_yaw_angular_v = 
-                                    imu_coeff_ * (curr_data.angular_v_[2] - imu_initializer_.GetYawBias());  // 去除bias 
+                                    imu_coeff_ * (curr_data.gyro_[2] - sensor_param_.imu_.gyro_bias_[2]);  // 去除bias 
                                 // 不使用EKF时，直接用IMU估计运动(这里假设线速度为0，只考虑旋转)
                                 diff_model.Update(curr_data.time_stamp_, 0, un_bias_yaw_angular_v); 
+                            }
+                            // 估计姿态
+                            simpleAttitudeEstimation(curr_data);
+                            // 检查姿态变化  
+                            if (i == imu_selected.size() - 1) {
+                                variation_roll_ = attitude_roll_ - origin_roll_;
+                                variation_pitch_ = attitude_pitch_ - origin_pitch_;
+                                std::cout << "姿态变化，pitch：" << variation_pitch_ << ", roll: " << variation_roll_ << std::endl;
                             }
                         }      
                     } else {
                         std::cout << msa2d::color::YELLOW << "IMU未初始化 ..." << msa2d::color::RESET << std::endl;
                     }
                 }
-                // 在没有IMU以及轮速的情况下  会使用运动学模型预测
-                if (use_motion_model_predict) {
-                    if (ekf_estimator_ != nullptr) {
-                        std::cout << msa2d::color::GREEN << "EKF ------- 先验运动学预测.." 
-                            << msa2d::color::RESET << std::endl;
-                        ekf_estimator_->Predict(curr_laser_ptr->start_time_, curr_laser_ptr->end_time_, diff_model);
+                /**
+                 * @todo 地面校准 
+                 * 
+                 */
+
+                // 如果姿态变化超过15度，则跳过
+                if (std::fabs(variation_roll_) < 0.2618 && std::fabs(variation_pitch_) < 0.2618) {
+                    // 如果姿态变化超过了5度小与15度，那么需要将点云校正到水平
+                    if (std::fabs(variation_roll_) > 0.0873 || std::fabs(variation_pitch_) > 0.0873) {
+                        std::cout << msa2d::color::YELLOW << "激光点云水平校正..." << msa2d::color::RESET << std::endl;
+                        laserLevelCorrection(*curr_laser_ptr); 
                     }
-                } 
-                msa2d::Pose2d predict_incre_pose;   // 预测帧间的运动 
-                predict_incre_pose = diff_model.ReadLastPose().pose_;
-                // std::cout << msa2d::color::YELLOW << "predict_incre_pose: " << predict_incre_pose.vec().transpose()
-                //     << msa2d::color::RESET << std::endl;
-                if (imu_calib_) {
-                    LaserUndistorted(*curr_laser_ptr, diff_model.GetPath());// 去除laser的畸变
-                }
-                // 体素降采样滤波
-                // std::cout << "ori size: " << curr_laser_ptr->pointcloud_.size() << std::endl;
-                msa2d::time::TicToc tt;
-                voxel_filter_->Filter(curr_laser_ptr->pointcloud_); 
-                tt.toc("filter ");
-                // std::cout << "filter size: " << curr_laser_ptr->pointcloud_.size() << std::endl;
-                // ::util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", *curr_laser_ptr); 
-                //                 laser_sm_.lock();
-                // laser_cache_.pop_front();  
-                // laser_sm_.unlock();  
-                // wheel_odom_selected.clear(); 
-                // imu_selected.clear();  
-                // continue; 
-                // static int global_match_time = 0;  
-                // if (global_match_time == 10) {
-                //     msa2d::ScanMatcher::FastCorrelativeScanMatcherOptions2D fcsm_option;
-                //     // msa2d::ScanMatcher::PrecomputationGridStack2D  pre_grid_stack(grid_map_pyramid_->getGridMap(0), fcsm_option);
-                    
-                //     // for (int h = 0; h <= pre_grid_stack.max_depth(); ++h) {
-                //     // // for (int h = 0; h <= 0; ++h) {
-                //     //     cv::Mat map_img = pre_grid_stack.Get(h).ToImage();
-                //     //     cv::imshow("map_" + std::to_string(h), map_img);
-                //     //     cv::waitKey(10);  
-                //     // }
-                //     msa2d::time::TicToc tt;
-                //     static float avg_time = 0; 
-                //     static int N = 0; 
-                //     msa2d::ScanMatcher::FastCorrelativeScanMatcher2D global_matcher(grid_map_pyramid_->getGridMap(0), fcsm_option);
-                //     float score = 0.f;
-                //     msa2d::Pose2d global_pose_estimate;
-                //     if (global_matcher.MatchFullSubmap(curr_laser_ptr->pointcloud_, 0.9, score, global_pose_estimate)) {
-                //         float t = tt.toc("---------------------------------------global matcher: ");
-                //         ++N;
-                //         avg_time += (t - avg_time) / N;  // 估计样本均值
-                //         std::cout << "avg_time: " << avg_time << std::endl;
-                //         // std::cout << "score: " << score << ", global_pose_estimate x: " << global_pose_estimate.x()
-                //         //     << ", y: " << global_pose_estimate.y() << ",yaw: " << global_pose_estimate.yaw() << std::endl; 
-                //         global_pose_estimate.SetVec(
-                //             grid_map_pyramid_->getGridMap(0)->getGridMapBase().PoseMapToWorld(global_pose_estimate.vec()));
-                //         std::cout << "global_pose_estimate: " << global_pose_estimate.vec().transpose() << std::endl;
-                //         ::util::DataDispatcher::GetInstance().Publish("global_pose", global_pose_estimate); 
-                //         ::util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", *curr_laser_ptr); 
-                //     } else {
-                //         std::cout << msa2d::color::RED << "global matcher error" << msa2d::color::RESET << std::endl;
-                //     }
-                //     global_match_time = 0;  
-                // }
-                // global_match_time++; 
-
-
-                msa2d::Pose2d estimated_odom_pose = last_fusionOdom_pose_.pose_ * predict_incre_pose;   // To<-last * Tlast<-curr
-                // 将odom系下的预测位姿转换到laser odom下
-                msa2d::Pose2d new_estimate_laserOdom_pose;
-                poseOdomToPrimeLaserOdom(estimated_odom_pose, new_estimate_laserOdom_pose);
-                // 基于栅格金字塔快速检测预测是否可靠，判断是否存在里程计打滑等现象
-                // fastPredictFailureDetection(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(1)); 
-                // std::cout << "odom predict: " << estimated_odom_pose.vec().transpose() << std::endl;
-                // 将点云数据转换为激光多分辨率金字塔数据
-                getLaserPyramidData(*curr_laser_ptr);     // 构造 laser_pyramid_container_ 
-                // tt.toc("getGridPyramidData");
-                tt.tic(); 
-                new_estimate_laserOdom_pose.SetVec(hector_matcher_->Solve(new_estimate_laserOdom_pose.vec(), 
-                    laser_pyramid_container_, *grid_map_pyramid_, lastScanMatchCov)); 
-                // std::cout << "laserOdom_pose: " << new_estimate_laserOdom_pose.vec().transpose() << std::endl;
-                // 细匹配  ICP / NDT 
-                tt.toc("match solve");
-                // 将pose转换到odom系下
-                posePrimeLaserToOdom(new_estimate_laserOdom_pose, estimated_odom_pose);
-                std::cout << "Odom_pose: " << estimated_odom_pose.vec().transpose() << std::endl;
-                // msa2d::Pose2d scan_matched_incre_pose = last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
-                // std::cout << msa2d::color::YELLOW << "scan_matched_incre_pose: " << scan_matched_incre_pose.vec().transpose()
-                //     << msa2d::color::RESET << std::endl;
-                // 校准IMU
-                if (!imu_calib_) {
-                    msa2d::Pose2d scan_matched_incre_pose = 
-                        last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
-                    if (std::fabs(predict_incre_pose.yaw()) > 0.02) {
-                        float t = predict_incre_pose.yaw() * scan_matched_incre_pose.yaw();
-                        if (t < 0) {
-                            imu_coeff_ = - imu_coeff_; 
+                    // 在没有IMU以及轮速的情况下  会使用运动学模型预测
+                    if (use_motion_model_predict) {
+                        if (ekf_estimator_ != nullptr) {
+                            std::cout << msa2d::color::GREEN << "EKF ------- 先验运动学预测.." 
+                                << msa2d::color::RESET << std::endl;
+                            ekf_estimator_->Predict(curr_laser_ptr->start_time_, curr_laser_ptr->end_time_, diff_model);
                         }
-                        imu_calib_ = true;  
+                    } 
+                    msa2d::Pose2d predict_incre_pose;   // 预测帧间的运动 
+                    predict_incre_pose = diff_model.ReadLastPose().pose_;
+                    // std::cout << msa2d::color::YELLOW << "predict_incre_pose: " << predict_incre_pose.vec().transpose()
+                    //     << msa2d::color::RESET << std::endl;
+                    if (imu_calib_) {
+                        LaserUndistorted(*curr_laser_ptr, diff_model.GetPath());// 去除laser的畸变
                     }
-                } 
-          
-                // 在IMU&odom初始化前，这里执行的是基于先验运动模型的EKF
-                if (ekf_estimate_enable_ && ekf_estimator_ != nullptr) {
-                    // 观测协方差矩阵
-                    Eigen::Matrix3f obs_cov = Eigen::Matrix3f::Zero();
-                    obs_cov(0, 0) = 0.0001;    // x方向方差   0.01 * 0.01
-                    obs_cov(1, 1) = 0.0001;    // y 方向方差 0.01 * 0.01
-                    obs_cov(2, 2) = 0.000003;    // yaw方差   0.1度
-                    // 进行观测校正
-                    ekf_estimator_->Correct(estimated_odom_pose, obs_cov, curr_laser_ptr->end_time_); 
-                    estimated_odom_pose = ekf_estimator_->ReadPosterioriPose();
-                    // 更新对应laser坐标
+                    // 体素降采样滤波
+                    std::cout << "ori size: " << curr_laser_ptr->pointcloud_.size() << std::endl;
+                    msa2d::time::TicToc tt;
+                    voxel_filter_->Filter(curr_laser_ptr->pointcloud_); 
+                    tt.toc("filter ");
+                    std::cout << "filter size: " << curr_laser_ptr->pointcloud_.size() << std::endl;
+                    ::util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", *curr_laser_ptr); 
+                    //                 laser_sm_.lock();
+                    // laser_cache_.pop_front();  
+                    // laser_sm_.unlock();  
+                    // wheel_odom_selected.clear(); 
+                    // imu_selected.clear();  
+                    // continue; 
+                    // static int global_match_time = 0;  
+                    // if (global_match_time == 10) {
+                    //     msa2d::ScanMatcher::FastCorrelativeScanMatcherOptions2D fcsm_option;
+                    //     // msa2d::ScanMatcher::PrecomputationGridStack2D  pre_grid_stack(grid_map_pyramid_->getGridMap(0), fcsm_option);
+                        
+                    //     // for (int h = 0; h <= pre_grid_stack.max_depth(); ++h) {
+                    //     // // for (int h = 0; h <= 0; ++h) {
+                    //     //     cv::Mat map_img = pre_grid_stack.Get(h).ToImage();
+                    //     //     cv::imshow("map_" + std::to_string(h), map_img);
+                    //     //     cv::waitKey(10);  
+                    //     // }
+                    //     msa2d::time::TicToc tt;
+                    //     static float avg_time = 0; 
+                    //     static int N = 0; 
+                    //     msa2d::ScanMatcher::FastCorrelativeScanMatcher2D global_matcher(grid_map_pyramid_->getGridMap(0), fcsm_option);
+                    //     float score = 0.f;
+                    //     msa2d::Pose2d global_pose_estimate;
+                    //     if (global_matcher.MatchFullSubmap(curr_laser_ptr->pointcloud_, 0.9, score, global_pose_estimate)) {
+                    //         float t = tt.toc("---------------------------------------global matcher: ");
+                    //         ++N;
+                    //         avg_time += (t - avg_time) / N;  // 估计样本均值
+                    //         std::cout << "avg_time: " << avg_time << std::endl;
+                    //         // std::cout << "score: " << score << ", global_pose_estimate x: " << global_pose_estimate.x()
+                    //         //     << ", y: " << global_pose_estimate.y() << ",yaw: " << global_pose_estimate.yaw() << std::endl; 
+                    //         global_pose_estimate.SetVec(
+                    //             grid_map_pyramid_->getGridMap(0)->getGridMapBase().PoseMapToWorld(global_pose_estimate.vec()));
+                    //         std::cout << "global_pose_estimate: " << global_pose_estimate.vec().transpose() << std::endl;
+                    //         ::util::DataDispatcher::GetInstance().Publish("global_pose", global_pose_estimate); 
+                    //         ::util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", *curr_laser_ptr); 
+                    //     } else {
+                    //         std::cout << msa2d::color::RED << "global matcher error" << msa2d::color::RESET << std::endl;
+                    //     }
+                    //     global_match_time = 0;  
+                    // }
+                    // global_match_time++; 
+
+
+                    msa2d::Pose2d estimated_odom_pose = last_fusionOdom_pose_.pose_ * predict_incre_pose;   // To<-last * Tlast<-curr
+                    // 将odom系下的预测位姿转换到laser odom下
+                    msa2d::Pose2d new_estimate_laserOdom_pose;
                     poseOdomToPrimeLaserOdom(estimated_odom_pose, new_estimate_laserOdom_pose);
-                }
-                // 系统初始化是指 联合imu和wheel的多传感器初始化
-                // 系统初始化只要有imu或wheel两者之一就可以，系统初始化后，
-                // 即使之后出现新的传感器数据，也不会重新初始化
-                if (!system_initialized_) {
-                    systemInit(new_estimate_laserOdom_pose, imu_selected, 
-                                            wheel_odom_selected, curr_laser_ptr->end_time_);
-                }
+                    // 基于栅格金字塔快速检测预测是否可靠，判断是否存在里程计打滑等现象
+                    // fastPredictFailureDetection(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(1)); 
+                    // std::cout << "odom predict: " << estimated_odom_pose.vec().transpose() << std::endl;
+                    // 将点云数据转换为激光多分辨率金字塔数据
+                    getLaserPyramidData(*curr_laser_ptr);     // 构造 laser_pyramid_container_ 
+                    // tt.toc("getGridPyramidData");
+                    tt.tic(); 
+                    new_estimate_laserOdom_pose.SetVec(hector_matcher_->Solve(new_estimate_laserOdom_pose.vec(), 
+                        laser_pyramid_container_, *grid_map_pyramid_, lastScanMatchCov)); 
+                    // std::cout << "laserOdom_pose: " << new_estimate_laserOdom_pose.vec().transpose() << std::endl;
+                    // 细匹配  ICP / NDT 
+                    tt.toc("match solve");
+                    // 将pose转换到odom系下
+                    posePrimeLaserToOdom(new_estimate_laserOdom_pose, estimated_odom_pose);
+                    std::cout << "Odom_pose: " << estimated_odom_pose.vec().transpose() << std::endl;
+                    // msa2d::Pose2d scan_matched_incre_pose = last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
+                    // std::cout << msa2d::color::YELLOW << "scan_matched_incre_pose: " << scan_matched_incre_pose.vec().transpose()
+                    //     << msa2d::color::RESET << std::endl;
+                    // 校准IMU
+                    if (!imu_calib_) {
+                        msa2d::Pose2d scan_matched_incre_pose = 
+                            last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
+                        if (std::fabs(predict_incre_pose.yaw()) > 0.02) {
+                            float t = predict_incre_pose.yaw() * scan_matched_incre_pose.yaw();
+                            if (t < 0) {
+                                imu_coeff_ = - imu_coeff_; 
+                            }
+                            imu_calib_ = true;  
+                        }
+                    } 
+            
+                    // 在IMU&odom初始化前，这里执行的是基于先验运动模型的EKF
+                    if (ekf_estimate_enable_ && ekf_estimator_ != nullptr) {
+                        // 观测协方差矩阵
+                        Eigen::Matrix3f obs_cov = Eigen::Matrix3f::Zero();
+                        obs_cov(0, 0) = 0.0001;    // x方向方差   0.01 * 0.01
+                        obs_cov(1, 1) = 0.0001;    // y 方向方差 0.01 * 0.01
+                        obs_cov(2, 2) = 0.000003;    // yaw方差   0.1度
+                        // 进行观测校正
+                        ekf_estimator_->Correct(estimated_odom_pose, obs_cov, curr_laser_ptr->end_time_); 
+                        estimated_odom_pose = ekf_estimator_->ReadPosterioriPose();
+                        // 更新对应laser坐标
+                        poseOdomToPrimeLaserOdom(estimated_odom_pose, new_estimate_laserOdom_pose);
+                    }
+                    // 系统初始化是指 联合imu和wheel的多传感器初始化
+                    // 系统初始化只要有imu或wheel两者之一就可以，系统初始化后，
+                    // 即使之后出现新的传感器数据，也不会重新初始化
+                    if (!system_initialized_) {
+                        systemInit(new_estimate_laserOdom_pose, imu_selected, 
+                                                wheel_odom_selected, curr_laser_ptr->end_time_);
+                    }
+                    // 利用栅格金子塔进行点云分类
+                    std::pair<std::vector<Eigen::Vector2f>, double> dynamic_points_data;    // 动态点
+                    std::pair<std::vector<Eigen::Vector2f>, double>  stable_points_data;   // 静态点 
+                    std::pair<std::vector<Eigen::Vector2f>, double>  undetermined_points_data;  // 待定点
+                    dynamic_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());
+                    dynamic_points_data.second = curr_laser_ptr->end_time_; 
+                    // dynamic_points_data.second = curr_laser_ptr->start_time_; 
+                    stable_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());  
+                    stable_points_data.second = curr_laser_ptr->end_time_; 
+                    // stable_points_data.second = curr_laser_ptr->start_time_; 
+                    undetermined_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());  
+                    undetermined_points_data.second = curr_laser_ptr->end_time_; 
+                    //  将激光点从激光坐标系转到laserOdom系 
+                    for (auto& point : curr_laser_ptr->pointcloud_.points()) {
+                        point.pos_ = new_estimate_laserOdom_pose * point.pos_;      //  转到laserOdom系 
+                    }
 
-                // 利用栅格金子塔进行点云分类
-                std::pair<std::vector<Eigen::Vector2f>, double> dynamic_points_data;    // 动态点
-                std::pair<std::vector<Eigen::Vector2f>, double>  stable_points_data;   // 静态点 
-                std::pair<std::vector<Eigen::Vector2f>, double>  undetermined_points_data;  // 待定点
-                dynamic_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());
-                dynamic_points_data.second = curr_laser_ptr->end_time_; 
-                // dynamic_points_data.second = curr_laser_ptr->start_time_; 
-                stable_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());  
-                stable_points_data.second = curr_laser_ptr->end_time_; 
-                // stable_points_data.second = curr_laser_ptr->start_time_; 
-                undetermined_points_data.first.reserve(curr_laser_ptr->pointcloud_.size());  
-                undetermined_points_data.second = curr_laser_ptr->end_time_; 
-                //  将激光点从激光坐标系转到laserOdom系 
-                for (auto& point : curr_laser_ptr->pointcloud_.points()) {
-                    point.pos_ = new_estimate_laserOdom_pose * point.pos_;      //  转到laserOdom系 
-                }
+                    dynamicObjectDetect(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(1), 
+                        dynamic_points_data.first, stable_points_data.first, undetermined_points_data.first);
 
-                pointClassification(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(0), 
-                    dynamic_points_data.first, stable_points_data.first, undetermined_points_data.first);
+                    last_fusionOdom_pose_.pose_ = estimated_odom_pose;
+                    last_fusionOdom_pose_.time_stamp_ = curr_laser_ptr->end_time_; 
+                    // last_fusionOdom_pose_.time_stamp_ = curr_laser_ptr->start_time_; 
+                    // 发布数据
+                    ::util::DataDispatcher::GetInstance().Publish("fusionOdom", last_fusionOdom_pose_); 
+                    ::util::DataDispatcher::GetInstance().Publish("dynamic_pointcloud", dynamic_points_data); 
+                    ::util::DataDispatcher::GetInstance().Publish("stable_pointcloud", stable_points_data); 
+                    ::util::DataDispatcher::GetInstance().Publish("local_map", local_map_.ReadLocalMap()); 
 
-                last_fusionOdom_pose_.pose_ = estimated_odom_pose;
-                last_fusionOdom_pose_.time_stamp_ = curr_laser_ptr->end_time_; 
-                // last_fusionOdom_pose_.time_stamp_ = curr_laser_ptr->start_time_; 
-                // 发布数据
-                ::util::DataDispatcher::GetInstance().Publish("fusionOdom", last_fusionOdom_pose_); 
-                ::util::DataDispatcher::GetInstance().Publish("dynamic_pointcloud", dynamic_points_data); 
-                ::util::DataDispatcher::GetInstance().Publish("stable_pointcloud", stable_points_data); 
-                ::util::DataDispatcher::GetInstance().Publish("local_map", local_map_.ReadLocalMap()); 
-
-                // 判断位姿是否丢失
-                if (!track_loss_ && !judgeTrackingLoss(dynamic_points_data.first, stable_points_data.first, 
-                                                            undetermined_points_data.first)) {
-                    /** 2.地图更新(last_map_updata_pose_初始化为一个很大的值，因此第一帧点云就会更新地图) **/
-                    if (msa2d::module::poseDifferenceLargerThan(new_estimate_laserOdom_pose.vec(), last_map_updata_pose_.vec(), 
-                            paramMinDistanceDiffForMapUpdate, paramMinAngleDiffForMapUpdate)) { 
-                        // 仅在位姿变化大于阈值 或者 map_without_matching为真 的时候进行地图更新
-                        grid_map_pyramid_->updateByScan(laser_pyramid_container_, new_estimate_laserOdom_pose.vec());
-                        grid_map_pyramid_->onMapUpdated();
-                        local_map_.UpdateLocalMapForMotion(stable_points_data.first);
-                        last_map_updata_pose_ = new_estimate_laserOdom_pose;
+                    // 判断位姿是否丢失
+                    if (!track_loss_ && !judgeTrackingLoss(dynamic_points_data.first, stable_points_data.first, 
+                                                                undetermined_points_data.first)) {
+                        /** 2.地图更新(last_map_updata_pose_初始化为一个很大的值，因此第一帧点云就会更新地图) **/
+                        if (msa2d::module::poseDifferenceLargerThan(new_estimate_laserOdom_pose.vec(), last_map_updata_pose_.vec(), 
+                                paramMinDistanceDiffForMapUpdate, paramMinAngleDiffForMapUpdate)) { 
+                            // 仅在位姿变化大于阈值 或者 map_without_matching为真 的时候进行地图更新
+                            grid_map_pyramid_->updateByScan(laser_pyramid_container_, new_estimate_laserOdom_pose.vec());
+                            grid_map_pyramid_->onMapUpdated();
+                            local_map_.UpdateLocalMapForMotion(stable_points_data.first);
+                            last_map_updata_pose_ = new_estimate_laserOdom_pose;
+                        }
                     }
                 }
 
@@ -444,7 +463,7 @@ bool FrontEndEstimator::fastPredictFailureDetection(const msa2d::sensor::LaserSc
 }
 
 /**
- * @brief 
+ * @brief 动态目标检测   
  * 
  * @param laser_ptr 
  * @param pose 
@@ -453,14 +472,15 @@ bool FrontEndEstimator::fastPredictFailureDetection(const msa2d::sensor::LaserSc
  * @param stable_points 
  * @param undetermined_points 
  */
-void FrontEndEstimator::pointClassification(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
+void FrontEndEstimator::dynamicObjectDetect(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
                                                                                             const msa2d::Pose2d& pose, 
                                                                                             const msa2d::map::OccGridMapBase* occGridMap,
                                                                                             std::vector<Eigen::Vector2f>& dynamic_points,
                                                                                             std::vector<Eigen::Vector2f>& stable_points,
                                                                                             std::vector<Eigen::Vector2f>& undetermined_points) {
-    for (auto& point : laser_ptr->pointcloud_) {
-        Eigen::Vector2f point_gridmap_pos = occGridMap->getGridMapBase().PosWorldToMapf(point.pos_);     // laserOdom -> map
+    // 先提取出动态候选点  
+    for (uint16_t i = 0; i < laser_ptr->pointcloud_.size(); ++i) {
+        Eigen::Vector2f point_gridmap_pos = occGridMap->getGridMapBase().PosWorldToMapf(laser_ptr->pointcloud_[i].pos_);     // laserOdom -> map
         // 超过范围的点一律丢掉
         if (occGridMap->getGridMapBase().pointOutOfMapBounds(point_gridmap_pos)) {
             continue;      
@@ -474,16 +494,25 @@ void FrontEndEstimator::pointClassification(const msa2d::sensor::LaserScan::Ptr&
                     occGridMap->isFree(grid_x, grid_y + 1) &&
                     occGridMap->isFree(grid_x, grid_y - 1)) {
                 // 检测该栅格前后左右四个方向，如果都为空，则该点是动态点，若至少有一个非空，则直接忽略
-                dynamic_points.push_back(point.pos_);  
+                dynamic_points.push_back(laser_ptr->pointcloud_[i].pos_);  
                 continue;  
-            } 
-        } 
-        if (occGridMap->isOccupied(grid_x, grid_y)) {
-            stable_points.push_back(point.pos_);  // 在一定距离内  且静态的点叫稳定点
-        } else {
-            undetermined_points.push_back(point.pos_);  
+            }
+            // 判断该点是否是前景点
+            // 前景点的判定依据：1、
         }
+
+        if (occGridMap->isOccupied(grid_x, grid_y)) {
+            stable_points.push_back(laser_ptr->pointcloud_[i].pos_);  // 在一定距离内  且静态的点叫稳定点
+        } else {
+            undetermined_points.push_back(laser_ptr->pointcloud_[i].pos_);  
+        }  
     }
+
+    // if (occGridMap->isOccupied(grid_x, grid_y)) {
+    //     stable_points.push_back(point.pos_);  // 在一定距离内  且静态的点叫稳定点
+    // } else {
+    //     undetermined_points.push_back(point.pos_);  
+    // }
 }
 
 /**
@@ -579,6 +608,24 @@ void FrontEndEstimator::LaserUndistorted(msa2d::sensor::LaserScan& laser,
 }
 
 /**
+ * @brief 
+ * 
+ * @param laser 
+ * @param variation_pitch 
+ * @param variation_roll 
+ */
+void FrontEndEstimator::laserLevelCorrection(msa2d::sensor::LaserScan& laser) {
+    Eigen::Matrix3d rotationMatrix = origin_R_gb_.inverse() * sensor_param_.imu_.R_gb_;   // curr->origin
+
+    for (auto& p : laser.pointcloud_) {
+        Eigen::Vector3f p_local(p.pos_[0], p.pos_[1], 0);
+        Eigen::Vector3f p_global = rotationMatrix.cast<float>() * p_local;
+        p.pos_[0] = p_global[0];
+        p.pos_[1] = p_global[1];
+    }
+}
+
+/**
  * @brief 系统初始化
  * 
  * @param laser_pose 
@@ -597,8 +644,17 @@ void FrontEndEstimator::systemInit(const msa2d::Pose2d& laser_pose,
     // 有IMU数据 则首先初始化MU，即标定出 imu bias
     if (!imu_selected.empty() && !imu_initialized_) {
         // IMU初始化 
-        if (imu_initializer_.Init(imu_selected)) {
-            imu_initialized_ = true; 
+        if (imu_tool_.Initialize(imu_selected, sensor_param_.imu_)) {
+            origin_roll_ = atan2(sensor_param_.imu_.R_gb_(2, 1), sensor_param_.imu_.R_gb_(2, 2));
+            origin_pitch_ = asin(-sensor_param_.imu_.R_gb_(2, 0)); 
+            // 初始化时 放置的地面的倾斜度要小与3度  
+            if (std::fabs(origin_roll_) < 0.0524 && std::fabs(origin_pitch_) < 0.0524) {
+                imu_initialized_ = true; 
+                origin_R_gb_ = sensor_param_.imu_.R_gb_;  
+                std::cout << msa2d::color::GREEN << "IMU初始化成功, 角速度bias: " 
+                << sensor_param_.imu_.gyro_bias_.transpose() << ", 姿态角 pitch: " << origin_pitch_
+                << ", roll: " << origin_roll_ << msa2d::color::RESET << std::endl;
+            }
         }
     } 
 
@@ -615,7 +671,7 @@ void FrontEndEstimator::systemInit(const msa2d::Pose2d& laser_pose,
         // LIO EKF估计器初始化
         if (work_mode == MODE::lio) {
             ekf_estimator_ = std::make_unique<EKFEstimatorPVQB>(
-                laser_pose, 0, 0, imu_initializer_.GetYawBias(), 1e-4, time_stamp); 
+                laser_pose, 0, 0, sensor_param_.imu_.gyro_bias_[2], 1e-4, time_stamp); 
         }
         // LWIO EKF估计器 初始化
         if (work_mode == MODE::lwio) {
@@ -803,5 +859,106 @@ void FrontEndEstimator::getLaserPyramidData(const msa2d::sensor::LaserScan& poin
         laser_pyramid_container_[index].setFrom(laser_pyramid_container_[0], 
             static_cast<float>(1.0 / pow(2.0, static_cast<double>(index))));
     }
+}
+
+/**
+ * @brief 姿态估计
+ * 
+ */
+void FrontEndEstimator::simpleAttitudeEstimation(const msa2d::sensor::ImuData& curr_data) {
+    // static Eigen::Matrix3d test_G_R_I_;
+    // 第一个IMU数据不计算，只记录时间信息
+    if (last_attitude_predict_time_ == 0) {
+        last_attitude_predict_time_ = curr_data.time_stamp_;
+        last_attitude_update_time_ = last_attitude_predict_time_;  
+        // test_G_R_I_ = sensor_param_.imu_.R_gb_; 
+        return;  
+    }
+
+    const Eigen::Vector3d unbiased_gyro = curr_data.gyro_ - sensor_param_.imu_.gyro_bias_;   // 去偏置 
+    const Eigen::Vector3d angle_vec = unbiased_gyro * (curr_data.time_stamp_ - last_attitude_predict_time_);
+    const double angle = angle_vec.norm();
+    const Eigen::Vector3d axis = angle_vec / angle;
+    Eigen::Matrix3d delta_rot = Eigen::AngleAxisd(angle, axis).toRotationMatrix();
+    sensor_param_.imu_.R_gb_ = sensor_param_.imu_.R_gb_ * delta_rot;    // 旋转矩阵姿态更新  
+    // test_G_R_I_ = test_G_R_I_ * delta_rot;  
+    last_attitude_predict_time_ = curr_data.time_stamp_; 
+    // 由陀螺仪观测出来的姿态角
+    attitude_roll_ = atan2(sensor_param_.imu_.R_gb_(2, 1), sensor_param_.imu_.R_gb_(2, 2));
+    attitude_pitch_ = asin(-sensor_param_.imu_.R_gb_(2, 0)); 
+
+    /**
+     * @brief 在线标定陀螺仪bias
+     * 测试：使用在线标定，15min 角度最大漂移0.1rad
+     * 不使用在线标定，15min角度最大漂移 0.3rad
+     * @todo 为了节省计算量，采用了一种迭代的静止标定方法，局限是需要载体在静止时才会自动校准参数，
+     *  改进点是如何实现高效的动态标定
+     */
+    imu_tool_.OnlineCalibGyroBias(unbiased_gyro, sensor_param_.imu_.gyro_bias_); 
+
+    // float gravity_pitch = -std::asin(curr_data.acc_[0] / 9.81); 
+    // float gravity_roll = std::atan2(curr_data.acc_[1], curr_data.acc_[2]); 
+
+    // util::SaveDataCsv<double>("", "gravity_pitch.csv", 
+    //                {gravity_pitch, curr_data.time_stamp_} , {"gravity_pitch", "time"});
+    // util::SaveDataCsv<double>("", "gravity_roll.csv", 
+    //                {gravity_roll, curr_data.time_stamp_} , {"gravity_roll", "time"});
+
+    // float gyro_roll_ = atan2(sensor_param_.imu_.R_gb_(2, 1), sensor_param_.imu_.R_gb_(2, 2));
+    // float gyro_pitch_ = asin(-sensor_param_.imu_.R_gb_(2, 0));
+
+    // float ori_gyro_roll_ = atan2(test_G_R_I_(2, 1), test_G_R_I_(2, 2));
+    // float ori_gyro_pitch_ = asin(-test_G_R_I_(2, 0));
+
+    // util::SaveDataCsv<double>("", "gyro_roll_.csv", 
+    //                {ori_gyro_roll_, curr_data.time_stamp_} , {"gyro_roll_", "time"});
+    // util::SaveDataCsv<double>("", "gyro_pitch_.csv", 
+    //                {ori_gyro_pitch_, curr_data.time_stamp_} , {"gyro_pitch_", "time"});
+
+    // 重力校正
+    float acc_v = curr_data.acc_.norm();
+    // 加速度不能和重力相差太大  
+    if (std::fabs(acc_v - 9.8) < 0.3 * 9.8) {
+        double correct_delta_t = curr_data.time_stamp_ - last_attitude_update_time_;
+        // 至少间隔0.1s
+        if (correct_delta_t > 0.1) {
+            // 计算权重因子
+            float time_ratio = 1 - std::exp(-correct_delta_t / 0.5);     // 距离上一次校正的时间间隔越大   越接近1
+            // std::cout << "correct_delta_t: " << correct_delta_t << ", time_ratio: " << time_ratio << std::endl;
+            // 由重力观测出姿态角
+            float gravity_pitch = -std::asin(curr_data.acc_[0] / 9.8); 
+            float gravity_roll = std::atan2(curr_data.acc_[1], curr_data.acc_[2]); 
+            // 重力解算出来的结果与陀螺仪解算出来的结果相差不能太大(5度)
+            // 否则由与短时间更加信任陀螺仪，所以认为重力观测不准
+            if (std::fabs(attitude_roll_ - gravity_roll) < 0.08 && std::fabs(attitude_pitch_ - gravity_pitch) < 0.08) {
+                //  加权融合
+                attitude_pitch_ = time_ratio * gravity_pitch + (1 - time_ratio) * attitude_pitch_;
+                attitude_roll_ = time_ratio * gravity_roll + (1 - time_ratio) * attitude_roll_;
+                // 重新更新旋转矩阵
+                sensor_param_.imu_.R_gb_ = Eigen::AngleAxisd(0, Eigen::Vector3d::UnitZ())
+                                                        * Eigen::AngleAxisd(attitude_pitch_, Eigen::Vector3d::UnitY())
+                                                        * Eigen::AngleAxisd(attitude_roll_, Eigen::Vector3d::UnitX());
+                // std::cout << msa2d::color::GREEN << "std::fabs(gyro_roll_ - roll) < 0.08 && std::fabs(gyro_pitch_ - pitch)"
+                //     << msa2d::color::RESET << std::endl;
+                last_attitude_update_time_ = curr_data.time_stamp_; 
+            } else {
+                // std::cout << msa2d::color::RED << "------------------------------------------------------------"
+                //     << msa2d::color::RESET << std::endl;
+            }
+        }
+    } else {
+        // std::cout << msa2d::color::RED << "acc_v too large" << std::endl;
+    }
+
+    // Eigen::Matrix3d rotation_matrix = sensor_param_.imu_.R_gb_;
+    // // float ori_roll_ = atan2(rotation_matrix(2, 1), rotation_matrix(2, 2)) - sensor_param_.imu_.original_roll_;
+    // // float ori_pitch_ = asin(-rotation_matrix(2, 0)) - sensor_param_.imu_.original_pitch_;
+    // float ori_roll_ = atan2(rotation_matrix(2, 1), rotation_matrix(2, 2));
+    // float ori_pitch_ = asin(-rotation_matrix(2, 0));
+
+    // util::SaveDataCsv<double>("", "fusion_pitch.csv", 
+    //                 {ori_pitch_, curr_data.time_stamp_} , {"fusion_pitch", "time"});
+    // util::SaveDataCsv<double>("", "fusion_roll.csv", 
+    //                 {ori_roll_, curr_data.time_stamp_} , {"fusion_roll", "time"});           
 }
 };

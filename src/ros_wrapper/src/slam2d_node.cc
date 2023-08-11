@@ -218,9 +218,13 @@ void RosWrapper::imuCallback(const sensor_msgs::Imu& imu_msg) {
     imu.acc_ = Eigen::Vector3d{imu_msg.linear_acceleration.x, 
                                                             imu_msg.linear_acceleration.y,
                                                             imu_msg.linear_acceleration.z};
-    imu.angular_v_ = Eigen::Vector3d{imu_msg.angular_velocity.x,
+    imu.gyro_ = Eigen::Vector3d{imu_msg.angular_velocity.x,
                                                                             imu_msg.angular_velocity.y,
                                                                             imu_msg.angular_velocity.z};      
+    imu.orientation_ = Eigen::Quaterniond{imu_msg.orientation.w,
+                                                                                imu_msg.orientation.x,    
+                                                                                imu_msg.orientation.y,
+                                                                                imu_msg.orientation.z};
     // float bias = 0;
     // if (i > 3000 && i < 6000) {
     //     bias = 0.1; 
@@ -228,7 +232,7 @@ void RosWrapper::imuCallback(const sensor_msgs::Imu& imu_msg) {
     //     bias = 0.2; 
     // }   
 
-    // imu.angular_v_[2] -= bias;              
+    // imu.gyro_[2] -= bias;              
 
     // static int f = 0;
     // if (f <= 0) {
@@ -386,12 +390,11 @@ void RosWrapper::wheelOdomDeadReckoningCallback(const msa2d::TimedPose2d& pose) 
 
 // 接收到去畸变的点云
 void RosWrapper::undistortedPointcloudCallback(const msa2d::sensor::LaserScan& data) {
-    // std::cout << common::GREEN << "send undistortedPointcloud ----------------------------" 
-    // << common::RESET << std::endl;
+    // std::cout << msa2d::color::GREEN << "send undistortedPointcloud ----------------------------" 
+    // << msa2d::color::RESET << std::endl;
     sensor_msgs::PointCloud pointcloud_msg;
     uint16_t size = data.pointcloud_.size(); 
     pointcloud_msg.points.reserve(size);
-
     for (uint16_t i = 0; i < size; ++i) {
         geometry_msgs::Point32 point; 
         point.x = data.pointcloud_[i].pos_[0];
@@ -403,7 +406,8 @@ void RosWrapper::undistortedPointcloudCallback(const msa2d::sensor::LaserScan& d
     // pointcloud_msg.header.stamp = ros::Time(data.start_time_); 
     // pointcloud_msg.header.stamp = ros::Time::now(); 
     // pointcloud_msg.header.frame_id = "global_pose";
-    pointcloud_msg.header.frame_id = "base_link";
+    // pointcloud_msg.header.frame_id = "base_link";
+    pointcloud_msg.header.frame_id = primeLaserFrame_name_;
     undistorted_pointcloud_publisher_.publish(pointcloud_msg);
 }
 
@@ -525,7 +529,7 @@ bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan
     size_t size = scan_msg.ranges.size();
     size_t last_index = size - 1; 
     laser.pointcloud_.reserve(size);
-    
+    // std::cout << "size: " << size << std::endl;
     // std::cout << std::setprecision(15) << "laser.start_time_:" << laser.start_time_ <<std::endl;
     if (!laser_info_.laser_imaging_reversed_) {
         laser.start_time_ = scan_msg.header.stamp.toSec();
@@ -549,7 +553,7 @@ bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan
     } else {
         for (int i = last_index; i >= 0; --i) {
             // if (i > laser_info_.valid_ind_upper_) continue;
-            if (i < 2 * laser_info_.valid_ind_lower_) continue;
+            // if (i < 2 * laser_info_.valid_ind_lower_) continue;
             // 距离滤波 
             if (!std::isfinite(scan_msg.ranges[i]) ||
                 scan_msg.ranges[i] < laser_min_dist_ ||
@@ -598,7 +602,7 @@ void RosWrapper::publishMapLoop(double map_pub_period) {
         //publishMap(mapPubContainer[2],estimator_->getGridMap(2), mapTime);
         //publishMap(mapPubContainer[1],estimator_->getGridMap(1), mapTime);
         // publishMap(mapPubContainer[2], estimator_->GetGridMap(2), mapTime, estimator_->GetMapMutex(2));
-        publishMap(mapPubContainer[0], estimator_->GetGridMap(0), mapTime, estimator_->GetMapMutex(0));
+        publishMap(mapPubContainer[1], estimator_->GetGridMap(1), mapTime, estimator_->GetMapMutex(1));
         r.sleep();
     }
 }

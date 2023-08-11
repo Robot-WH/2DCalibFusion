@@ -3,7 +3,7 @@
 #include <float.h>
 #include <yaml-cpp/yaml.h>
 #include "Kalman/ekf_estimator.hpp"
-#include "Initialize/2d_imu_initialize.hpp"
+#include "Sensor/2d_imu_tool.hpp"
 #include "motionModel.hpp"
 #include "Calibration/2d_handeye_calibration.hpp"
 #include "../util/DataDispatcher.hpp"
@@ -83,7 +83,7 @@ protected:
      * @param[out] undetermined_points 待定点  即击中未知栅格以及击中占据概率高与阈值的空白栅格的点
      * @return {*}
      */    
-    void pointClassification(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
+    void dynamicObjectDetect(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
                                                             const msa2d::Pose2d& pose, 
                                                             const msa2d::map::OccGridMapBase* occGridMap,
                                                             std::vector<Eigen::Vector2f>& dynamic_points,
@@ -101,6 +101,15 @@ protected:
      * @param motion_info 
      */
     void LaserUndistorted(msa2d::sensor::LaserScan& laser, Path& motion_info); 
+
+    /**
+     * @brief 激光水平校正
+     * 
+     * @param laser 
+     * @param variation_pitch 
+     * @param variation_roll 
+     */
+    void laserLevelCorrection(msa2d::sensor::LaserScan& laser);
 
     /**
      * @brief: 
@@ -157,7 +166,14 @@ protected:
 
     float getScaleToMap() const { return grid_map_pyramid_->getScaleToMap(); };    // 返回第 0层的scale  
 
+    void simpleAttitudeEstimation(const msa2d::sensor::ImuData& curr_data);
+
 private:
+    // 传感器参数 
+    struct SensorParam {
+        sensor::ImuParam imu_;  
+    } sensor_param_;
+
     enum class MODE {pure_lidar, lio, lwio};  // 三种模式  纯激光，lio-激光IMU融合，lwio-激光imu轮速融合 
     MODE work_mode = MODE::pure_lidar; 
     msa2d::map::OccGridMapPyramid* grid_map_pyramid_; // 地图接口对象--纯虚类进行
@@ -178,11 +194,22 @@ private:
     msa2d::TimedPose2d last_fusionOdom_pose_;
     msa2d::Pose2d last_lidarOdom_pose_;
     Eigen::Matrix3f lastScanMatchCov;
-    float linear_v_ = 0;
-    float rot_v_ = 0; 
+    float linear_v_ = 0.0f;
+    float rot_v_ = 0.0f; 
     float imu_coeff_ = 1.0f; 
     float paramMinDistanceDiffForMapUpdate;
     float paramMinAngleDiffForMapUpdate;
+
+    Eigen::Matrix3d origin_R_gb_;
+    float origin_pitch_ = 0.0f;
+    float origin_roll_ = 0.0f;
+    float variation_pitch_ = 0.0f;
+    float variation_roll_ = 0.0f;
+    float attitude_pitch_ = 0.0f;
+    float attitude_roll_ = 0.0f;
+
+    double last_attitude_predict_time_ = 0.0;  
+    double last_attitude_update_time_ = 0.0;  
 
     std::deque<msa2d::sensor::WheelOdom> wheelOdom_cache_;  
     std::deque<msa2d::sensor::ImuData> imu_cache_;  
@@ -193,7 +220,7 @@ private:
     std::shared_mutex laser_sm_;  
 
     std::unique_ptr<EKFEstimatorBase> ekf_estimator_; 
-    ImuInitializer2D imu_initializer_; 
+    sensor::ImuTool2D imu_tool_; 
     std::unique_ptr<msa2d::filter::VoxelGridFilter> voxel_filter_; 
     std::thread run_;  
 };

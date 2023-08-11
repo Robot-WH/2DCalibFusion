@@ -157,11 +157,12 @@ msa2d::sensor::ImuData LinearInterpolate<msa2d::sensor::ImuData>(
     float back_coeff = (time - front_time) / (back_time - front_time);
     msa2d::sensor::ImuData interpolate_data; 
     interpolate_data.acc_ = front_coeff * front_value.acc_ + back_coeff * back_value.acc_;  
-    interpolate_data.angular_v_ = front_coeff * front_value.angular_v_ + back_coeff * back_value.angular_v_;  
+    interpolate_data.gyro_ = front_coeff * front_value.gyro_ + back_coeff * back_value.gyro_;  
+    interpolate_data.orientation_ = front_value.orientation_.slerp(back_coeff, back_value.orientation_);
     return interpolate_data;  
 } 
 
-const std::string WORK_SPACE_PATH = "/home/lwh/code/2D_slam/src/2D-Calib-Fusion/data/"; 
+const std::string WORK_SPACE_PATH = "/home/pi/"; 
 
 /**
  * @brief 保存数据
