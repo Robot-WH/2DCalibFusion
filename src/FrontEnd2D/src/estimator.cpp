@@ -1,4 +1,5 @@
 #include <iomanip> 
+#include <assert.h>
 #include "FrontEnd2D/Estimator/estimator.hpp"
 #include "msa2d/ScanMatcher/fast_correlative_scan_matcher_2d.h"
 
@@ -478,6 +479,8 @@ void FrontEndEstimator::dynamicObjectDetect(const msa2d::sensor::LaserScan::Ptr&
                                                                                             std::vector<Eigen::Vector2f>& dynamic_points,
                                                                                             std::vector<Eigen::Vector2f>& stable_points,
                                                                                             std::vector<Eigen::Vector2f>& undetermined_points) {
+    std::vector<uint16_t> candidate_dynamic_points_index; 
+    candidate_dynamic_points_index.reserve(laser_ptr->pointcloud_.size());  
     // 先提取出动态候选点  
     for (uint16_t i = 0; i < laser_ptr->pointcloud_.size(); ++i) {
         Eigen::Vector2f point_gridmap_pos = occGridMap->getGridMapBase().PosWorldToMapf(laser_ptr->pointcloud_[i].pos_);     // laserOdom -> map
@@ -497,26 +500,121 @@ void FrontEndEstimator::dynamicObjectDetect(const msa2d::sensor::LaserScan::Ptr&
                     occGridMap->isFree(grid_x - 1, grid_y - 1) &&
                     occGridMap->isFree(grid_x + 1, grid_y - 1) &&
                     occGridMap->isFree(grid_x - 1, grid_y + 1)) {
-                // 检测该栅格前后左右四个方向，如果都为空，则该点是动态点，若至少有一个非空，则直接忽略
-                dynamic_points.push_back(laser_ptr->pointcloud_[i].pos_);  
+                // 检测该栅格前后八领域，如果都为空，则该点是动态点，若至少有一个非空，则直接忽略
+                candidate_dynamic_points_index.push_back(i);
                 continue;  
             }
-            // 判断该点是否是前景点
-            // 前景点的判定依据：1、
         }
-
-        if (occGridMap->isOccupied(grid_x, grid_y)) {
-            stable_points.push_back(laser_ptr->pointcloud_[i].pos_);  // 在一定距离内  且静态的点叫稳定点
-        } else {
-            undetermined_points.push_back(laser_ptr->pointcloud_[i].pos_);  
-        }  
     }
 
-    // if (occGridMap->isOccupied(grid_x, grid_y)) {
-    //     stable_points.push_back(point.pos_);  // 在一定距离内  且静态的点叫稳定点
-    // } else {
-    //     undetermined_points.push_back(point.pos_);  
+    std::vector<uint8_t> points_type_table; 
+    points_type_table.resize(laser_ptr->pointcloud_.size(), 0);  
+    std::vector<uint16_t> cluster_points; 
+    cluster_points.reserve(100);  
+    // 聚类
+    // 先向左 
+    int last_cluster_end_index = -1;
+    for (const uint16_t& i : candidate_dynamic_points_index) {
+        if (i <= last_cluster_end_index) continue; 
+        // 向左
+        uint16_t point_index = i;
+        cluster_points.push_back(point_index);
+        
+        while (point_index > last_cluster_end_index + 1) {
+            const float& curr_range = laser_ptr->pointcloud_[point_index].range_;
+            const float& last_range = laser_ptr->pointcloud_[point_index - 1].range_;
+            float min_d = std::min(last_range, curr_range);
+            float max_d = std::max(last_range, curr_range);
+            float alpha = laser_ptr->pointcloud_[point_index].rel_angle_ - 
+                                        laser_ptr->pointcloud_[point_index - 1].rel_angle_;
+            assert(alpha > 0);
+            if (alpha > 0.1745) break;      // 前后两个点的角度距离太远
+            float beta = std::atan2(min_d * std::sin(alpha), max_d - min_d * std::cos(alpha));  
+            if (beta < 0.3491) break;   // 如果夹角很小，说明不是一个类别的    本次聚类结束  
+            --point_index;
+            cluster_points.push_back(point_index);
+        }
+
+        // 向右
+        point_index = i;
+        while (point_index < laser_ptr->pointcloud_.size() - 1) {
+            const float& curr_range = laser_ptr->pointcloud_[point_index].range_;
+            const float& next_range = laser_ptr->pointcloud_[point_index + 1].range_;
+            float min_d = std::min(next_range, curr_range);
+            float max_d = std::max(next_range, curr_range);
+            float alpha = laser_ptr->pointcloud_[point_index + 1].rel_angle_ - 
+                                        laser_ptr->pointcloud_[point_index].rel_angle_;
+            assert(alpha > 0);
+            if (alpha > 0.1745) break;      // 前后两个点的角度距离太远
+            float beta = std::atan2(min_d * std::sin(alpha), max_d - min_d * std::cos(alpha));  
+            if (beta < 0.3491) break;   // 如果夹角很小，说明不是一个类别的    本次聚类结束  
+            ++point_index;
+            cluster_points.push_back(point_index);
+        }
+
+        last_cluster_end_index = point_index;   
+        // 聚类后 数量超过3的认为是动态
+        for (const auto& i : cluster_points) {
+            points_type_table[i] = 1;
+            if (cluster_points.size() > 3) {
+                dynamic_points.push_back(laser_ptr->pointcloud_[i].pos_); 
+            }
+        }
+        cluster_points.clear();  
+    }
+    // int last_cluster_end_index = -1;
+    // for (const uint16_t& i : candidate_dynamic_points_index) {
+    //     if (i <= last_cluster_end_index) continue; 
+    //     // 向左
+    //     uint16_t point_index = i;
+    //     while (point_index > last_cluster_end_index + 1) {
+    //         const float& curr_range = laser_ptr->pointcloud_[point_index].range_;
+    //         const float& last_range = laser_ptr->pointcloud_[point_index - 1].range_;
+    //         float min_d = std::min(last_range, curr_range);
+    //         float max_d = std::max(last_range, curr_range);
+    //         float alpha = laser_ptr->pointcloud_[point_index].rel_angle_ - 
+    //                                     laser_ptr->pointcloud_[point_index - 1].rel_angle_;
+    //         assert(alpha > 0);
+    //         if (alpha > 0.0873) break;      // 前后两个点的角度距离太远
+    //         float beta = std::atan2(min_d * std::sin(alpha), max_d - min_d * std::cos(alpha));  
+    //         if (beta < 10) break;   // 如果夹角很小，说明不是一个类别的    本次聚类结束  
+    //         --point_index;
+    //         cluster_points.push_back(point_index);
+    //     }
+
+    //     // 向右
+    //     point_index = i;
+    //     while (point_index < laser_ptr->pointcloud_.size() - 1) {
+    //         cluster_points.push_back(point_index);
+    //         const float& curr_range = laser_ptr->pointcloud_[point_index].range_;
+    //         const float& next_range = laser_ptr->pointcloud_[point_index + 1].range_;
+    //         float min_d = std::min(next_range, curr_range);
+    //         float max_d = std::max(next_range, curr_range);
+    //         float alpha = laser_ptr->pointcloud_[point_index + 1].rel_angle_ - 
+    //                                     laser_ptr->pointcloud_[point_index].rel_angle_;
+    //         assert(alpha > 0);
+    //         if (alpha > 0.0873) break;      // 前后两个点的角度距离太远
+    //         float beta = std::atan2(min_d * std::sin(alpha), max_d - min_d * std::cos(alpha));  
+    //         if (beta < 10) break;   // 如果夹角很小，说明不是一个类别的    本次聚类结束  
+    //         ++point_index;
+    //     }
+
+    //     last_cluster_end_index = point_index;   
+    //     // 聚类后 数量超过3的认为是动态
+    //     for (const auto& i : cluster_points) {
+    //         points_type_table[i] = 1;
+    //         if (cluster_points.size() > 0) {
+    //             dynamic_points.push_back(laser_ptr->pointcloud_[i].pos_); 
+    //         }
+    //     }
+    //     cluster_points.clear();  
     // }
+    // 提取出稳定点 
+    for (uint16_t i = 0; i < points_type_table.size(); ++i) {
+        if (points_type_table[i] == 0) {
+            stable_points.push_back(laser_ptr->pointcloud_[i].pos_);  // 在一定距离内  且静态的点叫稳定点
+        }
+    }
 }
 
 /**

@@ -22,4 +22,8 @@ kalman_filter:
   coordinate: "globalcentric"     # 参考坐标系  globalcentric / robocentric
   enable: false
 
+process:
+  filter:
+    downsample: 
+      cell_size: 0.01
           

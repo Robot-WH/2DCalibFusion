@@ -545,7 +545,7 @@ bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan
             point.pos_ = {scan_msg.ranges[i] * laser_info_.index_cos_[i],   // x
                                         scan_msg.ranges[i] * laser_info_.index_sin_[i]};   // y 
             point.range_ = scan_msg.ranges[i];
-            point.index_ = i;
+            point.rel_angle_ = i * laser_info_.angle_increment_;
             point.rel_time_ = i * laser_info_.time_increment_; 
             laser.pointcloud_.push_back(std::move(point)); 
         }
@@ -564,7 +564,7 @@ bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan
             point.pos_ = {scan_msg.ranges[i] * laser_info_.index_cos_[i],   // x
                                         scan_msg.ranges[i] * laser_info_.index_sin_[i]};   // y 
             point.range_ = scan_msg.ranges[i];
-            point.index_ = last_index - i;
+            point.rel_angle_ = (last_index - i) * laser_info_.angle_increment_;
             point.rel_time_ = (last_index - i) * laser_info_.time_increment_; 
             laser.pointcloud_.push_back(std::move(point)); 
         }

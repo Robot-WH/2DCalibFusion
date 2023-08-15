@@ -40,6 +40,7 @@ public:
     // 设置概率、距离阈值参数
     void SetMapUpdateMinDistDiff(float minDist) { paramMinDistanceDiffForMapUpdate = minDist; };
     void SetMapUpdateMinAngleDiff(float angleChange) { paramMinAngleDiffForMapUpdate = angleChange; };
+    void SetLaserAngleIncrementParam(float angle_increment) {sensor_param_.laser_angle_increment_ = angle_increment;};
 
     // 获取地图层数
     int GetMapLevels() const { return grid_map_pyramid_->getMapLevels(); };
@@ -172,6 +173,7 @@ private:
     // 传感器参数 
     struct SensorParam {
         sensor::ImuParam imu_;  
+        float laser_angle_increment_ = 0.0f;  
     } sensor_param_;
 
     enum class MODE {pure_lidar, lio, lwio};  // 三种模式  纯激光，lio-激光IMU融合，lwio-激光imu轮速融合 
@@ -180,7 +182,7 @@ private:
     msa2d::map::PointcloudLocalMap local_map_;  
     msa2d::ScanMatcher::hectorScanMatcher* hector_matcher_;
     std::vector<msa2d::sensor::LaserPointContainer> laser_pyramid_container_;  /// 不同图层对应的激光数据
-    
+    // 参数
     bool prime_laser_upside_down_; // 主雷达颠倒 
     bool ekf_estimate_enable_ = true;    // 默认使用ekf估计  
     bool system_initialized_ = false;  
@@ -194,6 +196,7 @@ private:
     msa2d::TimedPose2d last_fusionOdom_pose_;
     msa2d::Pose2d last_lidarOdom_pose_;
     Eigen::Matrix3f lastScanMatchCov;
+
     float linear_v_ = 0.0f;
     float rot_v_ = 0.0f; 
     float imu_coeff_ = 1.0f; 
