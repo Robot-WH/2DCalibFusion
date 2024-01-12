@@ -10,6 +10,7 @@
 #include <sensor_msgs/Imu.h>
 #include <nav_msgs/Odometry.h>
 #include <std_msgs/String.h>
+#include <std_msgs/Bool.h>
 #include <nav_msgs/GetMap.h>
 #include <laser_geometry/laser_geometry.h>
 // pcl
@@ -42,9 +43,10 @@ class RosWrapper {
 public:
     RosWrapper();
     ~RosWrapper();
-    void scanCallback(const sensor_msgs::LaserScan &scan);
-    void wheelOdomCallback(const nav_msgs::Odometry &odom);
-    void imuCallback(const sensor_msgs::Imu &imu);
+    void scanRosCallback(const sensor_msgs::LaserScan &scan);
+    void wheelOdomRosCallback(const nav_msgs::Odometry &odom);
+    void imuRosCallback(const sensor_msgs::Imu &imu);
+    void resetRosCallback(const std_msgs::Bool& flag);
     void FusionOdomResultCallback(const msa2d::TimedPose2d& data);
     void GlobalPoseCallback(const msa2d::Pose2d& pose);
     void lidarOdomExtransicCallback(const Eigen::Matrix<float, 6, 1>& ext);
@@ -55,6 +57,7 @@ public:
     void undeterminedPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data);
     void localMapCallback(const std::vector<Eigen::Vector2f>& data);
     void publishMapLoop(double p_map_pub_period_);
+    void ReadCamera();   
 
 private:
     void InitParams();
@@ -82,12 +85,14 @@ private:
     ros::Subscriber laser_scan_subscriber_;
     ros::Subscriber wheel_odom_subscriber_;
     ros::Subscriber imu_subscriber_;
+    ros::Subscriber reset_subscriber_;
     ros::Publisher odometryPublisher_;
     ros::Publisher wheelOdomDeadReckoningPublisher_;
     ros::Publisher undistorted_pointcloud_publisher_;    // 去畸变的点云
     ros::Publisher dynamic_pointcloud_publisher_;    // 动态点云
     ros::Publisher stable_pointcloud_publisher_;    // 稳定点云
     ros::Publisher localmap_publisher_;
+    ros::Publisher camera_publisher_;
 
     std::vector<MapPublisherContainer> mapPubContainer;
 

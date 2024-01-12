@@ -1,8 +1,18 @@
-#include <glog/logging.h>
+// #include <glog/logging.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/PointCloud2.h>
+#include <sensor_msgs/Image.h>   
+#include <sensor_msgs/CompressedImage.h>
+#include <opencv2/opencv.hpp>
+#include <cv_bridge/cv_bridge.h>
+#include <boost/filesystem.hpp>
 #include "slam2d_node.h"
+#include "msa2d/spdlog/spdlog.h"
+#include "msa2d/spdlog/sinks/stdout_color_sinks.h"
+#include "msa2d/spdlog/sinks/rotating_file_sink.h"
+
+namespace fs = boost::filesystem;
 
 // 使用PCL中点的数据结构 pcl::PointXYZ
 typedef pcl::PointXYZ PointT;
@@ -16,11 +26,13 @@ RosWrapper::RosWrapper() : private_node_("~"), lastGetMapUpdateIndex(-100) {
     InitParams();
 
     laser_scan_subscriber_ = node_handle_.subscribe(primeLaserTopic_name_, 
-        p_scan_subscriber_queue_size_, &RosWrapper::scanCallback, this); // 雷达数据处理
+        p_scan_subscriber_queue_size_, &RosWrapper::scanRosCallback, this); // 雷达数据处理
     wheel_odom_subscriber_ = node_handle_.subscribe(wheelOdomTopic_name_, 
-        100, &RosWrapper::wheelOdomCallback, this);   // 轮速计数据处理
+        100, &RosWrapper::wheelOdomRosCallback, this);   // 轮速计数据处理
     imu_subscriber_ = node_handle_.subscribe(imuTopic_name_, 
-        100, &RosWrapper::imuCallback, this);     // IMU数据处理 
+        100, &RosWrapper::imuRosCallback, this);     // IMU数据处理 
+    reset_subscriber_ = node_handle_.subscribe("cmd_reset", 
+        100, &RosWrapper::resetRosCallback, this);     // 前端重置处理 
 
     if (p_pub_odometry_) {
         odometryPublisher_ = node_handle_.advertise<nav_msgs::Odometry>("odom_Fusion", 50);
@@ -35,6 +47,8 @@ RosWrapper::RosWrapper() : private_node_("~"), lastGetMapUpdateIndex(-100) {
         "stable_laser_points", 10, this);
     localmap_publisher_ = node_handle_.advertise<sensor_msgs::PointCloud>(
         "local_map", 10, this);
+    camera_publisher_ = node_handle_.advertise<sensor_msgs::Image>(
+        "front_camera", 10, this);
 
     tf_base_to_odom_ = new tf::TransformBroadcaster();
     tf_laser_to_base_ = new tf::TransformBroadcaster();
@@ -54,7 +68,6 @@ RosWrapper::RosWrapper() : private_node_("~"), lastGetMapUpdateIndex(-100) {
                                                                                                 this, 
                                                                                                 5,
                                                                                                 true);  // 高优先级
-
     // 订阅激光和odom的外参回调
     ::util::DataDispatcher::GetInstance().Subscribe("lidarOdomExt", 
                                                                                                     &RosWrapper::lidarOdomExtransicCallback, 
@@ -83,6 +96,11 @@ RosWrapper::RosWrapper() : private_node_("~"), lastGetMapUpdateIndex(-100) {
                                                                                                     this, 
                                                                                                     5,
                                                                                                     true); // 高优先级                         
+    ::util::DataDispatcher::GetInstance().Subscribe("undetermined_pointcloud", 
+                                                                                                    &RosWrapper::undeterminedPointsCallback, 
+                                                                                                    this, 
+                                                                                                    5,
+                                                                                                    true); // 高优先级                                           
     // 局部地图
     ::util::DataDispatcher::GetInstance().Subscribe("local_map", 
                                                                                                     &RosWrapper::localMapCallback, 
@@ -191,10 +209,30 @@ void RosWrapper::InitParams() {
 }
 
 // 这个回调处理只输出位姿x，y，theta的里程计信息，这里会将odom位姿信息转化为速度和角速度
-void RosWrapper::wheelOdomCallback(const nav_msgs::Odometry& odom_msg) {
+void RosWrapper::wheelOdomRosCallback(const nav_msgs::Odometry& odom_msg) {
+    static double last_time = -1;
+    // 舍弃第一个数据  因为第一个数据有时会错乱  
+    if (last_time < 0) {
+        last_time = 0;
+        return;  
+    }
+    double curr_time = odom_msg.header.stamp.toSec();
+
+    if (curr_time <= last_time) {
+        // std::cout << common::RED << "------------------------IMU时间戳混乱!--------------------------" << std::endl; 
+        return;  
+    }
+
+    last_time = curr_time;
+
+    msa2d::sensor::WheelOdom odom; 
+    odom.time_stamp_ = curr_time;
+    odom.v_x_ = odom_msg.twist.twist.linear.x;
+    odom.omega_yaw_ = odom_msg.twist.twist.angular.z;  
+    estimator_->InputWheelOdom(odom);
 }
 
-void RosWrapper::imuCallback(const sensor_msgs::Imu& imu_msg) {
+void RosWrapper::imuRosCallback(const sensor_msgs::Imu& imu_msg) {
     static int i = 0; 
     static double last_time = -1;
     // 舍弃第一个数据  因为第一个数据有时会错乱  
@@ -202,7 +240,6 @@ void RosWrapper::imuCallback(const sensor_msgs::Imu& imu_msg) {
         last_time = 0;
         return;  
     }
-
     double curr_time = imu_msg.header.stamp.toSec();
 
     if (curr_time <= last_time) {
@@ -210,6 +247,7 @@ void RosWrapper::imuCallback(const sensor_msgs::Imu& imu_msg) {
         return;  
     }
 
+    last_time = curr_time;  
     // i++;
     //std::cout << common::RED << "imu index: " << i << common::RESET << std::endl;
 
@@ -248,7 +286,7 @@ void RosWrapper::imuCallback(const sensor_msgs::Imu& imu_msg) {
  * 激光数据处理回调函数，将ros数据格式转换为算法中的格式，并转换成地图尺度，交由slamProcessor处理。
  * 算法中所有的计算都是在地图尺度下进行。  
  */
-void RosWrapper::scanCallback(const sensor_msgs::LaserScan &scan) {
+void RosWrapper::scanRosCallback(const sensor_msgs::LaserScan& scan) {
     static double last_time = -1;
     // 舍弃第一个数据  因为第一个数据有时会错乱  
     if (last_time < 0) {
@@ -311,6 +349,11 @@ void RosWrapper::scanCallback(const sensor_msgs::LaserScan &scan) {
     //     ros::WallDuration duration = ros::WallTime::now() - startTime;
     //     ROS_INFO("Estimator2D Iter took: %f milliseconds", duration.toSec() * 1000.0f);
     // }
+}
+
+void RosWrapper::resetRosCallback(const std_msgs::Bool& flag) {
+    std::cout << "resetRosCallback" << std::endl;
+    estimator_->Reset();  
 }
 
 /**
@@ -454,7 +497,25 @@ void RosWrapper::stablePointsCallback(const std::pair<std::vector<Eigen::Vector2
 }
 
 void RosWrapper::undeterminedPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data) {
+    sensor_msgs::PointCloud pointcloud_msg;
+    uint16_t size = data.first.size(); 
+    pointcloud_msg.points.reserve(size);
+    if (size == 0) {
+        return;  
+    }
 
+    for (uint16_t i = 0; i < size; ++i) {
+        geometry_msgs::Point32 point; 
+        point.x = data.first[i][0];
+        point.y = data.first[i][1];
+        point.z = 0;
+        pointcloud_msg.points.push_back(point);
+    }
+    pointcloud_msg.header.stamp = ros::Time(data.second); 
+    // pointcloud_msg.header.stamp = ros::Time::now(); 
+    // pointcloud_msg.header.frame_id = primeLaserFrame_name_;  
+    pointcloud_msg.header.frame_id = laserOdomFrame_name_;
+    undistorted_pointcloud_publisher_.publish(pointcloud_msg);
 }
 
 void RosWrapper::localMapCallback(const std::vector<Eigen::Vector2f>& data) {
@@ -523,7 +584,14 @@ void RosWrapper::localMapCallback(const std::vector<Eigen::Vector2f>& data) {
 //     return true;
 // }
 
-
+/**
+ * @brief 
+ * 
+ * @param scan_msg 
+ * @param laser 
+ * @return true 
+ * @return false 
+ */
 bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan_msg, 
                                                                                                            msa2d::sensor::LaserScan& laser) {
     size_t size = scan_msg.ranges.size();
@@ -553,7 +621,7 @@ bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan
     } else {
         for (int i = last_index; i >= 0; --i) {
             // if (i > laser_info_.valid_ind_upper_) continue;
-            // if (i < 2 * laser_info_.valid_ind_lower_) continue;
+            if (i < 2 * laser_info_.valid_ind_lower_) continue;
             // 距离滤波 
             if (!std::isfinite(scan_msg.ranges[i]) ||
                 scan_msg.ranges[i] < laser_min_dist_ ||
@@ -575,6 +643,42 @@ bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan
     }
     laser.scan_period_ = laser_info_.laser_period_;  
     return true;
+}
+
+/**
+ * @brief 
+ * 
+ */
+void RosWrapper::ReadCamera() {
+    cv::VideoCapture cap("/dev/video10");  // 打开设备号为/dev/video0的USB相机
+    
+    if (!cap.isOpened()) {
+        std::cerr << "Error: Unable to open camera." << std::endl;
+        return;
+    }
+
+    cv::Mat frame;
+    cv_bridge::CvImage cv_image;
+    cv_image.encoding = "bgr8";
+
+    while (1) {
+        cap >> frame;  // 读取一帧图像
+    //     cv::imshow("USB Camera", frame);  // 显示图像
+    //   char key = cv::waitKey(10);
+        cv_image.image = frame;
+        sensor_msgs::ImagePtr msg = cv_image.toImageMsg();
+
+        // 发布图像消息
+        msg->header.stamp = ros::Time::now();
+        msg->header.frame_id = "camera_frame";
+        // 发布压缩图像消息
+        camera_publisher_.publish(msg);
+
+        // std::cout << "send image " << std::endl;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    }
+    cap.release();
 }
 
 // 对ROS地图进行数据初始化与分配内存
@@ -649,21 +753,64 @@ void RosWrapper::publishMap(MapPublisherContainer& mapPublisher,
 //     std::cout << "callback imuCallback, sensor_msgs::Imu" << std::endl;
 // }
 
+void CleanupOldLogFiles(const std::string& log_dir, int max_files) {
+    std::vector<std::string> log_files;
+    
+    // 枚举日志文件
+    for (const auto& entry : fs::directory_iterator(log_dir)) {
+        if (fs::is_regular_file(entry.status())) {
+            log_files.push_back(entry.path().string());
+        }
+    }
+
+    // 如果超过最大文件数量，删除最早的文件
+    if (log_files.size() >= max_files) {
+        std::sort(log_files.begin(), log_files.end());
+        for (size_t i = 0; i <= log_files.size() - max_files; ++i) {
+            fs::remove(log_files[i]);
+        }
+    }
+}
+
+
 int main(int argc, char **argv) {
     ros::init(argc, argv, "fusion estimator");
-    std::cout << "laser-imu-wheel fusion estimator, running in ARM..." << std::endl;
-    
+
     char* home_dir = getenv("HOME");
     std::string home_dir_str(home_dir);
     std::string log_dir = home_dir_str + "/log";
-    FLAGS_log_dir = log_dir;
-    // FLAGS_logbufsecs = 5;   // 没隔5s写一次磁盘
-    // FLAGS_max_log_size = 10; // 设置单个日志文件大小上限为 10MB
-    google::InitGoogleLogging(argv[0]);
-    // google::SetLogDestination(google::GLOG_INFO, "/home/lwh/log/info.log");
-    // google::SetLogDestination(google::GLOG_WARNING, "/path/to/warning.log");
-    // google::SetLogDestination(google::GLOG_ERROR, "/path/to/error.log");
+
+    // 清理日志    最多3个日志
+    CleanupOldLogFiles(log_dir, 3);
+    
+    // 生成唯一的日志文件名，例如 "info-2023-08-29-135245.txt"
+    auto now = std::chrono::system_clock::now();
+    auto timestamp = std::chrono::system_clock::to_time_t(now);
+    std::tm tm = *std::localtime(&timestamp);
+    char filename[64];
+    std::strftime(filename, sizeof(filename), "/info-%Y-%m-%d-%H%M%S.txt", &tm);
+
+    //打印到终端
+    auto console = spdlog::stdout_color_mt("console");
+    //打印到日志文件中
+    auto max_size = 1024 * 1024 * 5; //单个日志文件大小
+    auto max_files = 3;          //最多存几个日志文件
+    auto logger = spdlog::rotating_logger_mt("spdlog_use", log_dir + filename, max_size, max_files);
+ 
+    spdlog::set_default_logger(logger);
+    spdlog::set_level(spdlog::level::info);   // 只有 info、warning、error、critical 级别的日志消息会被记录，而 debug 级别的日志消息将被忽略。
+    spdlog::set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%g:%#] [%n:%l] %v");
+ 
+    spdlog::info("laser-imu-wheel fusion estimator, running in ARM...");
+    
     RosWrapper frontend_node;
+    std::thread read_camera(&RosWrapper::ReadCamera, &frontend_node);  
+
     ros::spin();
+
+    spdlog::drop("console");
+    spdlog::drop("logger");
+    spdlog::shutdown();
+
     return (0);
 }

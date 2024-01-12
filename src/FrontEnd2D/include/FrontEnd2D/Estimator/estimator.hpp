@@ -41,7 +41,7 @@ public:
     void SetMapUpdateMinDistDiff(float minDist) { paramMinDistanceDiffForMapUpdate = minDist; };
     void SetMapUpdateMinAngleDiff(float angleChange) { paramMinAngleDiffForMapUpdate = angleChange; };
     void SetLaserAngleIncrementParam(float angle_increment) {sensor_param_.laser_angle_increment_ = angle_increment;};
-
+    void Reset();
     // 获取地图层数
     int GetMapLevels() const { return grid_map_pyramid_->getMapLevels(); };
     // 上一次匹配到的位姿
@@ -58,6 +58,8 @@ protected:
      * @brief: 融合线程
      */    
     void run();
+
+    void reset();   
 
     /**
      * @brief: 快速预测失效检测
@@ -91,9 +93,8 @@ protected:
                                                             std::vector<Eigen::Vector2f>& stable_points,
                                                             std::vector<Eigen::Vector2f>& undetermined_points);
 
-    bool judgeTrackingLoss(const std::vector<Eigen::Vector2f>& dynamic_points,
-                                                        const std::vector<Eigen::Vector2f>& stable_points,
-                                                        const std::vector<Eigen::Vector2f>& undetermined_points);
+    bool judgeTrackingLoss(const uint16_t& good_matched_points_num,
+                                                                                            const uint16_t& all_points_num);
 
     /**
      * @brief 激光畸变去除
@@ -143,6 +144,9 @@ protected:
     template<class DataT_>
     bool extractSensorData(std::deque<DataT_>& data_cache, std::deque<DataT_>& extracted_container,
             const double& start_time, const double& end_time);
+    
+    template<class DataT_>
+    bool extractSensorData(const std::deque<DataT_>& data_cache, DataT_& data, const double& timestamp);
 
     void transformPathFromOdomToLaser(Path& motion_info);
     // 激光雷达的运动转到Odom系
@@ -150,9 +154,6 @@ protected:
 
     // odom系的运动转到激光系 
     void poseOdomToPrimeLaserOdom(const msa2d::Pose2d& pose_in_odom, msa2d::Pose2d& pose_in_laser);
-
-    /** slam系统重置 **/
-    void reset();
 
     /**
      * @brief: 将当前的输入点云 转换成2D栅格金字塔数据 
@@ -190,12 +191,14 @@ private:
     bool has_odomExtrinsicParam_ = true; 
     bool imu_calib_ = false;  
     bool track_loss_ = false;    // 位姿丢失
+    std::atomic<bool> reset_flag_ = false;  
     Eigen::Isometry2f primeLaserOdomExtrinsic_;  
     // Eigen::Isometry3f primeLaserOdomExtrinsic_;  
     msa2d::Pose2d last_map_updata_pose_;
     msa2d::TimedPose2d last_fusionOdom_pose_;
     msa2d::Pose2d last_lidarOdom_pose_;
     Eigen::Matrix3f lastScanMatchCov;
+    float last_track_quality_factor_ = -1;
 
     float linear_v_ = 0.0f;
     float rot_v_ = 0.0f; 

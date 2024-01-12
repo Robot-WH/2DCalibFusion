@@ -18,12 +18,12 @@
         <param name="tracking_frame" value="base_link"/>
 
         <param name="scan_topic" value="laser_scan"/>
-        <param name="wheel_topic" value="odomq"/>
+        <param name="wheel_topic" value="odom"/>
         <param name="imu_topic" value="imu"/>
         <param name="scan_frame" value="front_laser_link"/>
         <param name="use_max_scan_range" value="20"/>
         <param name="laser_min_dist" value="0.2"/>
-        <param name="laser_max_dist" value="15"/>
+        <param name="laser_max_dist" value="3.5"/>
         <param name="laser_imaging_reversed" value="true"/>      
 
         <param name="map_pub_period" value="2"/>

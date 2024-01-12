@@ -1,6 +1,6 @@
 sensor:
     laser:
-        valid_distance: 15    # 激光的有效距离 
+        valid_distance: 3    # 激光的有效距离 
 # 传感器外参
 extrinsic:
   odom: 

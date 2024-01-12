@@ -1,11 +1,21 @@
 #include <iomanip> 
 #include <assert.h>
+// #include <glog/logging.h>
 #include "FrontEnd2D/Estimator/estimator.hpp"
 #include "msa2d/ScanMatcher/fast_correlative_scan_matcher_2d.h"
-
+#include "msa2d/spdlog/spdlog.h"
 namespace Estimator2D {
-
 FrontEndEstimator::FrontEndEstimator(const std::string& config_path) {
+    // google::InitGoogleLogging(nullptr);
+    // char* home_dir = getenv("HOME");
+    // std::string home_dir_str(home_dir);
+    // std::string log_dir = home_dir_str + "/log";
+    // std::cout << "lof file path: " << log_dir << std::endl;
+    // FLAGS_log_dir = log_dir;
+    // FLAGS_logtostderr = true;        // 输出到终端
+    // FLAGS_alsologtostderr = true;    // 输出到终端和日志文件
+    // google::SetLogFilenameExtension(".log"); // 设置日志文件的扩展名
+
     YAML::Node yaml = YAML::LoadFile(config_path);
     /* 构建初始地图 */
     msa2d::map::OccGridMapPyramid::Option grid_map_pyramid_option;
@@ -28,17 +38,17 @@ FrontEndEstimator::FrontEndEstimator(const std::string& config_path) {
     hector_matcher_ = new msa2d::ScanMatcher::hectorScanMatcher(option);
     std::cout << "ScanMatcher create done" << std::endl;
     laser_pyramid_container_.resize(grid_map_pyramid_->getMapLevels());
-    this->reset();
+    this->Reset();
     /* 设置进行地图更新的位姿变化阈值 **/
-    this->SetMapUpdateMinDistDiff(0.4f * 1.0f);
-    this->SetMapUpdateMinAngleDiff(0.13f * 1.0f);
+    this->SetMapUpdateMinDistDiff(0.4f);  // 
+    this->SetMapUpdateMinAngleDiff(0.3491f);   // 20
     // 读取laser-imu外参
     Eigen::Matrix<float, 6, 1> laser_odom_ext;
     laser_odom_ext.setZero();  
     prime_laser_upside_down_ = yaml["extrinsic"]["odom"]["prime_laser"]["upside_down"].as<bool>();
     
     if (prime_laser_upside_down_) {
-        std::cout << "主激光雷达颠倒! "<< std::endl;
+        std::cout << "主激光雷达颠倒!!! "<< std::endl;
         laser_odom_ext(3, 0) = 3.1415926;     // 绕x轴转180度  
     }
 
@@ -80,27 +90,10 @@ void FrontEndEstimator::InputLaser(msa2d::sensor::LaserScan::ptr& laser_ptr) {
  * @param data 
  */
 void FrontEndEstimator::InputWheelOdom(msa2d::sensor::WheelOdom& data) {
-    static DiffModelDeadReckoning diff_model; 
     wheel_sm_.lock();   // 写锁 
+    // std::cout << "wheel " << std::endl;
     wheelOdom_cache_.push_back(data);
     wheel_sm_.unlock();  
-    // // 检测laser是否有数据， 若laser 没数据， 则退化为 odom/imu融合里程计
-    // wheel_sm_.lock_shared();    // 读锁
-    // if (laser_cache_.empty()) {
-    //     if (wheelOdom_cache_.back().time_stamp_ - wheelOdom_cache_.front().time_stamp_ > 0.5) {
-    //         model_ = MODEL::WHEEL_IMU;
-    //         std::cout << "INFO: 没有激光数据，切换到wheel + imu 模式..." << std::endl; 
-    //         // 进行初始化
-    //     }
-    // } else {
-    //     if (wheelOdom_cache_.back().time_stamp_ - laser_cache_.back()->start_time_ > 0.5) {
-    //         model_ = MODEL::WHEEL_IMU;
-    //     }
-    // }
-    // wheel_sm_.unlock_shared();
-    // // 若为imu/wheel融合 - wheel提供线速度，imu提供角速度形成组合里程计，此外在线估计陀螺仪bias
-    // if (model_ == MODEL::WHEEL_IMU) {
-    // }
 }
 
 /**
@@ -149,22 +142,6 @@ void FrontEndEstimator::run() {
                     }
                 }
                 wait_time = 0; 
-                // 如果位姿丢失   需要重定位 
-                // 重定位失败则新建一个轨迹  
-                if (track_loss_) {
-                    std::cout << msa2d::color::RED << "tracking loss !!!!" << 
-                        msa2d::color::RESET << std::endl;
-                    // 判断是否静止
-
-                    // laser_sm_.lock();
-                    // laser_cache_.pop_front();  
-                    // laser_sm_.unlock();  
-                    // wheel_odom_selected.clear(); 
-                    // imu_selected.clear();  
-                    // continue;  
-                }
-
-                
                 /**
                  * @brief 进行EKF预测   
                  * aser-imu-wheel模式： imu预测+laser&wheel校正
@@ -174,30 +151,42 @@ void FrontEndEstimator::run() {
                  */
                 DiffModelDeadReckoning diff_model;  // 差分模型
                 bool use_motion_model_predict = true;  
-            
-                if (imu_selected.empty()) {
-                    // 如果 有轮速数据，且odom与激光的外参已知  那么用轮速进行预测
-                    if (!wheel_odom_selected.empty()) {
-                        if (has_odomExtrinsicParam_) {
+
+                // 如果 有轮速数据，且odom与激光的外参已知  那么用轮速进行预测
+                if (!wheel_odom_selected.empty()) {
+                    if (has_odomExtrinsicParam_) {
+                        if (!imu_selected.empty()) {
+                            std::cout << msa2d::color::GREEN << "使用轮速计 + IMU 预测 ..." << msa2d::color::RESET << std::endl; 
+                        } else {
                             std::cout << msa2d::color::GREEN << "使用轮速计预测 ..." << msa2d::color::RESET << std::endl; 
-                            use_motion_model_predict = false;  
-                            // 使用轮速进行预测
-                            for (uint16_t i = 0; i < wheel_odom_selected.size(); ++i) {
-                                const auto& curr_data = wheel_odom_selected[i]; 
-                                // 运动学前向传播
-                                diff_model.Update(curr_data.time_stamp_, curr_data.v_x_, curr_data.omega_yaw_); 
-                                // EKF预测
-                                /**
-                                 * @brief 对于轮速 需要考虑优化外参和不优化外参
-                                 */
-                                if (ekf_estimator_ != nullptr) {
-                                    ekf_estimator_->Predict(diff_model.ReadLastPose().pose_, curr_data.v_x_, 
-                                        curr_data.omega_yaw_, 0.0025, 1, curr_data.time_stamp_);    // 测量噪声 0.05m/s, 60度/s
+                        }
+                        use_motion_model_predict = false;  
+                        // 使用轮速进行预测
+                        for (uint16_t i = 0; i < wheel_odom_selected.size(); ++i) {
+                            auto& curr_data = wheel_odom_selected[i]; 
+                            // 如果有imu数据，用imu的角速度观测替换轮速计的角速度
+                            if (!imu_selected.empty()) {
+                                msa2d::sensor::ImuData imu_data;
+                                if (extractSensorData(imu_selected, imu_data, curr_data.time_stamp_)) {
+                                    curr_data.omega_yaw_ = imu_data.gyro_[2] - sensor_param_.imu_.gyro_bias_[2];  
+                                    std::cout << "轮速  IMU" << std::endl;
+                                } else {
+                                    std::cout << "轮速获取IMU数据失败" << std::endl;
                                 }
+                            }
+                            // 运动学前向传播
+                            diff_model.Update(curr_data.time_stamp_, curr_data.v_x_, curr_data.omega_yaw_); 
+                            // EKF预测
+                            /**
+                             * @brief 对于轮速 需要考虑优化外参和不优化外参
+                             */
+                            if (ekf_estimator_ != nullptr) {
+                                ekf_estimator_->Predict(diff_model.ReadLastPose().pose_, curr_data.v_x_, 
+                                    curr_data.omega_yaw_, 0.0025, 1, curr_data.time_stamp_);    // 测量噪声 0.05m/s, 60度/s
                             }
                         }
                     }
-                } else {
+                } else if (!imu_selected.empty()) {
                     // 如果IMU初始化了
                     if (imu_initialized_) {
                         // 若使用EKF滤波器  
@@ -225,33 +214,89 @@ void FrontEndEstimator::run() {
                             if (i == imu_selected.size() - 1) {
                                 variation_roll_ = attitude_roll_ - origin_roll_;
                                 variation_pitch_ = attitude_pitch_ - origin_pitch_;
-                                std::cout << "姿态变化，pitch：" << variation_pitch_ << ", roll: " << variation_roll_ << std::endl;
+                                // std::cout << "姿态变化，pitch：" << variation_pitch_ << ", roll: " << variation_roll_ << std::endl;
                             }
                         }      
                     } else {
                         std::cout << msa2d::color::YELLOW << "IMU未初始化 ..." << msa2d::color::RESET << std::endl;
                     }
+                } else {
+                    std::cout << msa2d::color::YELLOW << "无IMU， 无轮速.." << msa2d::color::RESET << std::endl; 
                 }
+            
+                // 在没有IMU以及轮速的情况下  会使用运动学模型预测
+                if (use_motion_model_predict) {
+                    if (ekf_estimator_ != nullptr) {
+                        std::cout << msa2d::color::GREEN << "EKF ------- 先验运动学预测.." 
+                            << msa2d::color::RESET << std::endl;
+                        ekf_estimator_->Predict(curr_laser_ptr->start_time_, curr_laser_ptr->end_time_, diff_model);
+                    }
+                } 
+                
                 /**
                  * @todo 地面校准 
                  * 
                  */
-
                 // 如果姿态变化超过15度，则跳过
                 if (std::fabs(variation_roll_) < 0.2618 && std::fabs(variation_pitch_) < 0.2618) {
                     // 如果姿态变化超过了5度小与15度，那么需要将点云校正到水平
                     if (std::fabs(variation_roll_) > 0.0873 || std::fabs(variation_pitch_) > 0.0873) {
-                        std::cout << msa2d::color::YELLOW << "激光点云水平校正..." << msa2d::color::RESET << std::endl;
-                        laserLevelCorrection(*curr_laser_ptr); 
+                        // std::cout << msa2d::color::YELLOW << "激光点云水平校正..." << msa2d::color::RESET << std::endl;
+                        // laserLevelCorrection(*curr_laser_ptr); 
                     }
-                    // 在没有IMU以及轮速的情况下  会使用运动学模型预测
-                    if (use_motion_model_predict) {
-                        if (ekf_estimator_ != nullptr) {
-                            std::cout << msa2d::color::GREEN << "EKF ------- 先验运动学预测.." 
-                                << msa2d::color::RESET << std::endl;
-                            ekf_estimator_->Predict(curr_laser_ptr->start_time_, curr_laser_ptr->end_time_, diff_model);
+                    // 如果位姿丢失   需要重定位 
+                    // 若连续10帧都重定位失败，那么新建一个轨迹  
+                    if (track_loss_) {
+                        static int relocalization_times = 0; 
+                        std::cout << msa2d::color::RED << "tracking loss !!!!" << 
+                            msa2d::color::RESET << std::endl;
+                        // 进行重定位
+                        msa2d::ScanMatcher::FastCorrelativeScanMatcherOptions2D fcsm_option;
+
+                        msa2d::time::TicToc tt;
+                        // static float avg_time = 0; 
+                        static int N = 0; 
+                        msa2d::ScanMatcher::FastCorrelativeScanMatcher2D global_matcher(grid_map_pyramid_->getGridMap(0), fcsm_option);
+                        float score = 0.f;
+                        msa2d::Pose2d global_pose_estimate;
+                        if (global_matcher.MatchFullSubmap(curr_laser_ptr->pointcloud_, 0.9, score, global_pose_estimate)) {
+                            float t = tt.toc("---------------------------------------global matcher: ");
+                            // ++N;
+                            // avg_time += (t - avg_time) / N;  // 估计样本均值
+                            // std::cout << "avg_time: " << avg_time << std::endl;
+                            // std::cout << "score: " << score << ", global_pose_estimate x: " << global_pose_estimate.x()
+                            //     << ", y: " << global_pose_estimate.y() << ",yaw: " << global_pose_estimate.yaw() << std::endl; 
+                            // global_pose_estimate.SetVec(
+                            //     grid_map_pyramid_->getGridMap(0)->getGridMapBase().PoseMapToWorld(global_pose_estimate.vec()));
+                            last_fusionOdom_pose_.pose_.SetVec(
+                                grid_map_pyramid_->getGridMap(0)->getGridMapBase().PoseMapToWorld(global_pose_estimate.vec()));
+                            
+                            // std::cout << "global_pose_estimate: " << global_pose_estimate.vec().transpose() << std::endl;
+                            // ::util::DataDispatcher::GetInstance().Publish("global_pose", global_pose_estimate); 
+                            // ::util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", *curr_laser_ptr); 
+                            spdlog::info("定位找回！");
+                            relocalization_times = 0; 
+                        } else {
+                            spdlog::info("重定位失败！");
+                            std::cout << msa2d::color::RED << "global matcher error" << msa2d::color::RESET << std::endl;
+                            relocalization_times++;
+                            // 如果连续几次重定位都失败的话   那么重置一次建图
+                            if (relocalization_times > 5) {
+                                reset();  
+                                relocalization_times = 0;
+                                track_loss_ = false;
+                            }
+                            continue;  
                         }
-                    } 
+
+                        // laser_sm_.lock();
+                        // laser_cache_.pop_front();  
+                        // laser_sm_.unlock();  
+                        // wheel_odom_selected.clear(); 
+                        // imu_selected.clear();  
+                        // continue;  
+                    }
+
                     msa2d::Pose2d predict_incre_pose;   // 预测帧间的运动 
                     predict_incre_pose = diff_model.ReadLastPose().pose_;
                     // std::cout << msa2d::color::YELLOW << "predict_incre_pose: " << predict_incre_pose.vec().transpose()
@@ -260,55 +305,12 @@ void FrontEndEstimator::run() {
                         LaserUndistorted(*curr_laser_ptr, diff_model.GetPath());// 去除laser的畸变
                     }
                     // 体素降采样滤波
-                    std::cout << "ori size: " << curr_laser_ptr->pointcloud_.size() << std::endl;
-                    msa2d::time::TicToc tt;
+                    // std::cout << "ori size: " << curr_laser_ptr->pointcloud_.size() << std::endl;
+                    // msa2d::time::TicToc tt;
                     voxel_filter_->Filter(curr_laser_ptr->pointcloud_); 
-                    tt.toc("filter ");
-                    std::cout << "filter size: " << curr_laser_ptr->pointcloud_.size() << std::endl;
-                    ::util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", *curr_laser_ptr); 
-                    //                 laser_sm_.lock();
-                    // laser_cache_.pop_front();  
-                    // laser_sm_.unlock();  
-                    // wheel_odom_selected.clear(); 
-                    // imu_selected.clear();  
-                    // continue; 
-                    // static int global_match_time = 0;  
-                    // if (global_match_time == 10) {
-                    //     msa2d::ScanMatcher::FastCorrelativeScanMatcherOptions2D fcsm_option;
-                    //     // msa2d::ScanMatcher::PrecomputationGridStack2D  pre_grid_stack(grid_map_pyramid_->getGridMap(0), fcsm_option);
-                        
-                    //     // for (int h = 0; h <= pre_grid_stack.max_depth(); ++h) {
-                    //     // // for (int h = 0; h <= 0; ++h) {
-                    //     //     cv::Mat map_img = pre_grid_stack.Get(h).ToImage();
-                    //     //     cv::imshow("map_" + std::to_string(h), map_img);
-                    //     //     cv::waitKey(10);  
-                    //     // }
-                    //     msa2d::time::TicToc tt;
-                    //     static float avg_time = 0; 
-                    //     static int N = 0; 
-                    //     msa2d::ScanMatcher::FastCorrelativeScanMatcher2D global_matcher(grid_map_pyramid_->getGridMap(0), fcsm_option);
-                    //     float score = 0.f;
-                    //     msa2d::Pose2d global_pose_estimate;
-                    //     if (global_matcher.MatchFullSubmap(curr_laser_ptr->pointcloud_, 0.9, score, global_pose_estimate)) {
-                    //         float t = tt.toc("---------------------------------------global matcher: ");
-                    //         ++N;
-                    //         avg_time += (t - avg_time) / N;  // 估计样本均值
-                    //         std::cout << "avg_time: " << avg_time << std::endl;
-                    //         // std::cout << "score: " << score << ", global_pose_estimate x: " << global_pose_estimate.x()
-                    //         //     << ", y: " << global_pose_estimate.y() << ",yaw: " << global_pose_estimate.yaw() << std::endl; 
-                    //         global_pose_estimate.SetVec(
-                    //             grid_map_pyramid_->getGridMap(0)->getGridMapBase().PoseMapToWorld(global_pose_estimate.vec()));
-                    //         std::cout << "global_pose_estimate: " << global_pose_estimate.vec().transpose() << std::endl;
-                    //         ::util::DataDispatcher::GetInstance().Publish("global_pose", global_pose_estimate); 
-                    //         ::util::DataDispatcher::GetInstance().Publish("undistorted_pointcloud", *curr_laser_ptr); 
-                    //     } else {
-                    //         std::cout << msa2d::color::RED << "global matcher error" << msa2d::color::RESET << std::endl;
-                    //     }
-                    //     global_match_time = 0;  
-                    // }
-                    // global_match_time++; 
-
-
+                    // tt.toc("filter ");
+                    // std::cout << "filter size: " << curr_laser_ptr->pointcloud_.size() << std::endl;
+ 
                     msa2d::Pose2d estimated_odom_pose = last_fusionOdom_pose_.pose_ * predict_incre_pose;   // To<-last * Tlast<-curr
                     // 将odom系下的预测位姿转换到laser odom下
                     msa2d::Pose2d new_estimate_laserOdom_pose;
@@ -319,15 +321,15 @@ void FrontEndEstimator::run() {
                     // 将点云数据转换为激光多分辨率金字塔数据
                     getLaserPyramidData(*curr_laser_ptr);     // 构造 laser_pyramid_container_ 
                     // tt.toc("getGridPyramidData");
-                    tt.tic(); 
-                    new_estimate_laserOdom_pose.SetVec(hector_matcher_->Solve(new_estimate_laserOdom_pose.vec(), 
-                        laser_pyramid_container_, *grid_map_pyramid_, lastScanMatchCov)); 
+                    // tt.tic(); 
+                    // new_estimate_laserOdom_pose.SetVec(hector_matcher_->Solve(new_estimate_laserOdom_pose.vec(), 
+                    //     laser_pyramid_container_, *grid_map_pyramid_, lastScanMatchCov)); 
                     // std::cout << "laserOdom_pose: " << new_estimate_laserOdom_pose.vec().transpose() << std::endl;
                     // 细匹配  ICP / NDT 
-                    tt.toc("match solve");
+                    // tt.toc("match solve");
                     // 将pose转换到odom系下
                     posePrimeLaserToOdom(new_estimate_laserOdom_pose, estimated_odom_pose);
-                    std::cout << "Odom_pose: " << estimated_odom_pose.vec().transpose() << std::endl;
+                    // std::cout << "Odom_pose: " << estimated_odom_pose.vec().transpose() << std::endl;
                     // msa2d::Pose2d scan_matched_incre_pose = last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
                     // std::cout << msa2d::color::YELLOW << "scan_matched_incre_pose: " << scan_matched_incre_pose.vec().transpose()
                     //     << msa2d::color::RESET << std::endl;
@@ -380,7 +382,7 @@ void FrontEndEstimator::run() {
                     for (auto& point : curr_laser_ptr->pointcloud_.points()) {
                         point.pos_ = new_estimate_laserOdom_pose * point.pos_;      //  转到laserOdom系 
                     }
-
+                    // 动态目标检测 
                     dynamicObjectDetect(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(1), 
                         dynamic_points_data.first, stable_points_data.first, undetermined_points_data.first);
 
@@ -389,23 +391,30 @@ void FrontEndEstimator::run() {
                     // last_fusionOdom_pose_.time_stamp_ = curr_laser_ptr->start_time_; 
                     // 发布数据
                     ::util::DataDispatcher::GetInstance().Publish("fusionOdom", last_fusionOdom_pose_); 
-                    ::util::DataDispatcher::GetInstance().Publish("dynamic_pointcloud", dynamic_points_data); 
+                    // ::util::DataDispatcher::GetInstance().Publish("dynamic_pointcloud", dynamic_points_data); 
                     ::util::DataDispatcher::GetInstance().Publish("stable_pointcloud", stable_points_data); 
-                    ::util::DataDispatcher::GetInstance().Publish("local_map", local_map_.ReadLocalMap()); 
+                    // ::util::DataDispatcher::GetInstance().Publish("local_map", local_map_.ReadLocalMap()); 
+                    // ::util::DataDispatcher::GetInstance().Publish("undetermined_pointcloud", undetermined_points_data); 
 
                     // 判断位姿是否丢失
-                    if (!track_loss_ && !judgeTrackingLoss(dynamic_points_data.first, stable_points_data.first, 
-                                                                undetermined_points_data.first)) {
+                    if (!judgeTrackingLoss(stable_points_data.first.size(), curr_laser_ptr->pointcloud_.size())) {
                         /** 2.地图更新(last_map_updata_pose_初始化为一个很大的值，因此第一帧点云就会更新地图) **/
                         if (msa2d::module::poseDifferenceLargerThan(new_estimate_laserOdom_pose.vec(), last_map_updata_pose_.vec(), 
                                 paramMinDistanceDiffForMapUpdate, paramMinAngleDiffForMapUpdate)) { 
                             // 仅在位姿变化大于阈值 或者 map_without_matching为真 的时候进行地图更新
                             grid_map_pyramid_->updateByScan(laser_pyramid_container_, new_estimate_laserOdom_pose.vec());
                             grid_map_pyramid_->onMapUpdated();
-                            local_map_.UpdateLocalMapForMotion(stable_points_data.first);
+                            // local_map_.UpdateLocalMapForMotion(stable_points_data.first);
                             last_map_updata_pose_ = new_estimate_laserOdom_pose;
                         }
                     }
+                } else {
+                    spdlog::info("姿态倾斜过大！");
+                }
+
+                if (reset_flag_) {
+                    reset();  
+                    reset_flag_ = false;   
                 }
 
                 laser_sm_.lock();
@@ -473,6 +482,113 @@ bool FrontEndEstimator::fastPredictFailureDetection(const msa2d::sensor::LaserSc
  * @param stable_points 
  * @param undetermined_points 
  */
+// void FrontEndEstimator::dynamicObjectDetect(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
+//                                                                                             const msa2d::Pose2d& pose, 
+//                                                                                             const msa2d::map::OccGridMapBase* occGridMap,
+//                                                                                             std::vector<Eigen::Vector2f>& dynamic_points,
+//                                                                                             std::vector<Eigen::Vector2f>& stable_points,
+//                                                                                             std::vector<Eigen::Vector2f>& undetermined_points) {
+//     std::vector<uint16_t> candidate_dynamic_points_index; 
+//     candidate_dynamic_points_index.reserve(laser_ptr->pointcloud_.size());  
+//     // 先提取出动态候选点  
+//     for (uint16_t i = 0; i < laser_ptr->pointcloud_.size(); ++i) {
+//         Eigen::Vector2f point_gridmap_pos = occGridMap->getGridMapBase().PosWorldToMapf(laser_ptr->pointcloud_[i].pos_);     // laserOdom -> map
+//         // 超过范围的点一律丢掉
+//         if (occGridMap->getGridMapBase().pointOutOfMapBounds(point_gridmap_pos)) {
+//             continue;      
+//         }
+//         uint16_t grid_x = point_gridmap_pos[0];
+//         uint16_t grid_y = point_gridmap_pos[1]; 
+//         // 只要是非占用(周围领域也需要是非占用)，即空闲点和未知点，那么就认为是候选动态 
+//         if (!occGridMap->isOccupied(grid_x, grid_y)) {
+//             if (!occGridMap->isOccupied(grid_x + 1, grid_y) && 
+//                     !occGridMap->isOccupied(grid_x - 1, grid_y) && 
+//                     !occGridMap->isOccupied(grid_x, grid_y + 1) &&
+//                     !occGridMap->isOccupied(grid_x, grid_y - 1) &&
+//                     !occGridMap->isOccupied(grid_x + 1, grid_y + 1) &&
+//                     !occGridMap->isOccupied(grid_x - 1, grid_y - 1) &&
+//                     !occGridMap->isOccupied(grid_x + 1, grid_y - 1) &&
+//                     !occGridMap->isOccupied(grid_x - 1, grid_y + 1)) {
+//                 // 检测该栅格前后八领域，如果都不是占据点，则认为是可疑的动态候选
+//                 candidate_dynamic_points_index.push_back(i);
+//                 continue;  
+//             }
+//         }
+//     }
+
+//     // std::cout << "candidate_dynamic_points num: " << candidate_dynamic_points_index.size() << std::endl;
+//     // 对于候选动态点进行可视检测   进一步分类为动态点和待定点  
+//     std::vector<uint8_t> points_type_table;    // 标记点云的类型  
+//     points_type_table.resize(laser_ptr->pointcloud_.size(), 0);  
+
+
+    
+//     std::vector<uint16_t> cluster_points; 
+//     cluster_points.reserve(100);  
+//     // 聚类   向两侧生长  
+//     // 先向左 
+//     int last_cluster_end_index = -1;
+
+//     for (const uint16_t& i : candidate_dynamic_points_index) {
+//         if (i <= last_cluster_end_index) continue; 
+//         uint16_t point_index = i;
+//         cluster_points.push_back(point_index);
+//         // // 向左生长
+//         // while (point_index > last_cluster_end_index + 1) {
+//         //     const float& curr_range = laser_ptr->pointcloud_[point_index].range_;
+//         //     const float& last_range = laser_ptr->pointcloud_[point_index - 1].range_;
+//         //     float min_d = std::min(last_range, curr_range);
+//         //     float max_d = std::max(last_range, curr_range);
+//         //     float alpha = laser_ptr->pointcloud_[point_index].rel_angle_ - 
+//         //                                 laser_ptr->pointcloud_[point_index - 1].rel_angle_;
+//         //     assert(alpha > 0);
+//         //     if (alpha > 0.1745) break;      // 前后两个点的角度间隔太远
+//         //     float beta = std::atan2(min_d * std::sin(alpha), max_d - min_d * std::cos(alpha));  
+//         //     if (beta < 0.3491) break;   // 如果夹角很小 < 20，说明不是一个类别的    本次聚类结束  
+//         //     --point_index;
+//         //     cluster_points.push_back(point_index);
+//         // }
+
+//         // // 向右生长
+//         // point_index = i;
+//         // while (point_index < laser_ptr->pointcloud_.size() - 1) {
+//         //     const float& curr_range = laser_ptr->pointcloud_[point_index].range_;
+//         //     const float& next_range = laser_ptr->pointcloud_[point_index + 1].range_;
+//         //     float min_d = std::min(next_range, curr_range);
+//         //     float max_d = std::max(next_range, curr_range);
+//         //     float alpha = laser_ptr->pointcloud_[point_index + 1].rel_angle_ - 
+//         //                                 laser_ptr->pointcloud_[point_index].rel_angle_;
+//         //     assert(alpha > 0);
+//         //     if (alpha > 0.1745) break;      // 前后两个点的角度距离太远
+//         //     float beta = std::atan2(min_d * std::sin(alpha), max_d - min_d * std::cos(alpha));  
+//         //     if (beta < 0.3491) break;   // 如果夹角很小，说明不是一个类别的    本次聚类结束  
+//         //     ++point_index;
+//         //     cluster_points.push_back(point_index);
+//         // }
+
+//         // std::cout << "cluster_points size: " << cluster_points.size() << std::endl;
+
+//         last_cluster_end_index = point_index;   
+//         // 聚类后 数量超过3的认为是动态
+//         for (const auto& i : cluster_points) {
+//             points_type_table[i] = 1;
+//             if (cluster_points.size() > 0) {
+//                 dynamic_points.push_back(laser_ptr->pointcloud_[i].pos_); 
+//             } else {
+//                 undetermined_points.push_back(laser_ptr->pointcloud_[i].pos_); 
+//             }
+//         }
+//         cluster_points.clear();  
+//     }
+
+//     // 提取出稳定点 
+//     for (uint16_t i = 0; i < points_type_table.size(); ++i) {
+//         if (points_type_table[i] == 0) {
+//             stable_points.push_back(laser_ptr->pointcloud_[i].pos_);  // 在一定距离内  且静态的点叫稳定点
+//         }
+//     }
+// }
+
 void FrontEndEstimator::dynamicObjectDetect(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
                                                                                             const msa2d::Pose2d& pose, 
                                                                                             const msa2d::map::OccGridMapBase* occGridMap,
@@ -490,128 +606,23 @@ void FrontEndEstimator::dynamicObjectDetect(const msa2d::sensor::LaserScan::Ptr&
         }
         uint16_t grid_x = point_gridmap_pos[0];
         uint16_t grid_y = point_gridmap_pos[1]; 
-
-        if (occGridMap->isFree(grid_x, grid_y)) {
-            if (occGridMap->isFree(grid_x + 1, grid_y) && 
-                    occGridMap->isFree(grid_x - 1, grid_y) && 
-                    occGridMap->isFree(grid_x, grid_y + 1) &&
-                    occGridMap->isFree(grid_x, grid_y - 1) &&
-                    occGridMap->isFree(grid_x + 1, grid_y + 1) &&
-                    occGridMap->isFree(grid_x - 1, grid_y - 1) &&
-                    occGridMap->isFree(grid_x + 1, grid_y - 1) &&
-                    occGridMap->isFree(grid_x - 1, grid_y + 1)) {
-                // 检测该栅格前后八领域，如果都为空，则该点是动态点，若至少有一个非空，则直接忽略
+        // 只要是非占用(周围领域也需要是非占用)，即空闲点和未知点，那么就认为是候选动态 
+        if (!occGridMap->isOccupied(grid_x, grid_y)) {
+            if (!occGridMap->isOccupied(grid_x + 1, grid_y) && 
+                    !occGridMap->isOccupied(grid_x - 1, grid_y) && 
+                    !occGridMap->isOccupied(grid_x, grid_y + 1) &&
+                    !occGridMap->isOccupied(grid_x, grid_y - 1) &&
+                    !occGridMap->isOccupied(grid_x + 1, grid_y + 1) &&
+                    !occGridMap->isOccupied(grid_x - 1, grid_y - 1) &&
+                    !occGridMap->isOccupied(grid_x + 1, grid_y - 1) &&
+                    !occGridMap->isOccupied(grid_x - 1, grid_y + 1)) {
+                // 检测该栅格前后八领域，如果都不是占据点，则认为是可疑的动态候选
                 candidate_dynamic_points_index.push_back(i);
                 continue;  
+            } else {
+                stable_points.push_back(laser_ptr->pointcloud_[i].pos_);  // 在一定距离内  且静态的点叫稳定点
             }
-        }
-    }
-
-    std::vector<uint8_t> points_type_table; 
-    points_type_table.resize(laser_ptr->pointcloud_.size(), 0);  
-    std::vector<uint16_t> cluster_points; 
-    cluster_points.reserve(100);  
-    // 聚类
-    // 先向左 
-    int last_cluster_end_index = -1;
-    for (const uint16_t& i : candidate_dynamic_points_index) {
-        if (i <= last_cluster_end_index) continue; 
-        // 向左
-        uint16_t point_index = i;
-        cluster_points.push_back(point_index);
-        
-        while (point_index > last_cluster_end_index + 1) {
-            const float& curr_range = laser_ptr->pointcloud_[point_index].range_;
-            const float& last_range = laser_ptr->pointcloud_[point_index - 1].range_;
-            float min_d = std::min(last_range, curr_range);
-            float max_d = std::max(last_range, curr_range);
-            float alpha = laser_ptr->pointcloud_[point_index].rel_angle_ - 
-                                        laser_ptr->pointcloud_[point_index - 1].rel_angle_;
-            assert(alpha > 0);
-            if (alpha > 0.1745) break;      // 前后两个点的角度距离太远
-            float beta = std::atan2(min_d * std::sin(alpha), max_d - min_d * std::cos(alpha));  
-            if (beta < 0.3491) break;   // 如果夹角很小，说明不是一个类别的    本次聚类结束  
-            --point_index;
-            cluster_points.push_back(point_index);
-        }
-
-        // 向右
-        point_index = i;
-        while (point_index < laser_ptr->pointcloud_.size() - 1) {
-            const float& curr_range = laser_ptr->pointcloud_[point_index].range_;
-            const float& next_range = laser_ptr->pointcloud_[point_index + 1].range_;
-            float min_d = std::min(next_range, curr_range);
-            float max_d = std::max(next_range, curr_range);
-            float alpha = laser_ptr->pointcloud_[point_index + 1].rel_angle_ - 
-                                        laser_ptr->pointcloud_[point_index].rel_angle_;
-            assert(alpha > 0);
-            if (alpha > 0.1745) break;      // 前后两个点的角度距离太远
-            float beta = std::atan2(min_d * std::sin(alpha), max_d - min_d * std::cos(alpha));  
-            if (beta < 0.3491) break;   // 如果夹角很小，说明不是一个类别的    本次聚类结束  
-            ++point_index;
-            cluster_points.push_back(point_index);
-        }
-
-        last_cluster_end_index = point_index;   
-        // 聚类后 数量超过3的认为是动态
-        for (const auto& i : cluster_points) {
-            points_type_table[i] = 1;
-            if (cluster_points.size() > 3) {
-                dynamic_points.push_back(laser_ptr->pointcloud_[i].pos_); 
-            }
-        }
-        cluster_points.clear();  
-    }
-    // int last_cluster_end_index = -1;
-    // for (const uint16_t& i : candidate_dynamic_points_index) {
-    //     if (i <= last_cluster_end_index) continue; 
-    //     // 向左
-    //     uint16_t point_index = i;
-    //     while (point_index > last_cluster_end_index + 1) {
-    //         const float& curr_range = laser_ptr->pointcloud_[point_index].range_;
-    //         const float& last_range = laser_ptr->pointcloud_[point_index - 1].range_;
-    //         float min_d = std::min(last_range, curr_range);
-    //         float max_d = std::max(last_range, curr_range);
-    //         float alpha = laser_ptr->pointcloud_[point_index].rel_angle_ - 
-    //                                     laser_ptr->pointcloud_[point_index - 1].rel_angle_;
-    //         assert(alpha > 0);
-    //         if (alpha > 0.0873) break;      // 前后两个点的角度距离太远
-    //         float beta = std::atan2(min_d * std::sin(alpha), max_d - min_d * std::cos(alpha));  
-    //         if (beta < 10) break;   // 如果夹角很小，说明不是一个类别的    本次聚类结束  
-    //         --point_index;
-    //         cluster_points.push_back(point_index);
-    //     }
-
-    //     // 向右
-    //     point_index = i;
-    //     while (point_index < laser_ptr->pointcloud_.size() - 1) {
-    //         cluster_points.push_back(point_index);
-    //         const float& curr_range = laser_ptr->pointcloud_[point_index].range_;
-    //         const float& next_range = laser_ptr->pointcloud_[point_index + 1].range_;
-    //         float min_d = std::min(next_range, curr_range);
-    //         float max_d = std::max(next_range, curr_range);
-    //         float alpha = laser_ptr->pointcloud_[point_index + 1].rel_angle_ - 
-    //                                     laser_ptr->pointcloud_[point_index].rel_angle_;
-    //         assert(alpha > 0);
-    //         if (alpha > 0.0873) break;      // 前后两个点的角度距离太远
-    //         float beta = std::atan2(min_d * std::sin(alpha), max_d - min_d * std::cos(alpha));  
-    //         if (beta < 10) break;   // 如果夹角很小，说明不是一个类别的    本次聚类结束  
-    //         ++point_index;
-    //     }
-
-    //     last_cluster_end_index = point_index;   
-    //     // 聚类后 数量超过3的认为是动态
-    //     for (const auto& i : cluster_points) {
-    //         points_type_table[i] = 1;
-    //         if (cluster_points.size() > 0) {
-    //             dynamic_points.push_back(laser_ptr->pointcloud_[i].pos_); 
-    //         }
-    //     }
-    //     cluster_points.clear();  
-    // }
-    // 提取出稳定点 
-    for (uint16_t i = 0; i < points_type_table.size(); ++i) {
-        if (points_type_table[i] == 0) {
+        } else {
             stable_points.push_back(laser_ptr->pointcloud_[i].pos_);  // 在一定距离内  且静态的点叫稳定点
         }
     }
@@ -619,41 +630,52 @@ void FrontEndEstimator::dynamicObjectDetect(const msa2d::sensor::LaserScan::Ptr&
 
 /**
  * @brief 判断位姿是否的丢失 
- *                  判断动态点和未知点是否突然增多，如果增加的比例大于阈值，那么认为位姿跟踪丢失 
+ *                  通过稳定匹配点占总激光点数的比例进行判断  
+ *                  定位丢失，则稳定匹配点占总激光点数的比例将会突然下降
  * @param dynamic_points 
  * @return true 位姿丢失
  * @return false  位姿良好
  */
-bool FrontEndEstimator::judgeTrackingLoss(const std::vector<Eigen::Vector2f>& dynamic_points,
-                                                                                            const std::vector<Eigen::Vector2f>& stable_points,
-                                                                                            const std::vector<Eigen::Vector2f>& undetermined_points) {
-    static float last_track_quality_factor = -1;
-    float curr_track_quality_factor = (float)stable_points.size() / dynamic_points.size(); 
-    std::cout << "dynamic_points size: " << dynamic_points.size() <<
-        "stable_points size: " << stable_points.size() << std::endl;
-    // 初始化
-    if (last_track_quality_factor < 0) {
-        if (stable_points.size() == 0) {
-            return false;  
-        }
-        // 点的质量必须要良好才能初始化
-        if (curr_track_quality_factor > 5) { 
-            last_track_quality_factor = curr_track_quality_factor;
-            return false;
-        } else {
-            std::cout << "curr_track_quality_factor: " << curr_track_quality_factor << std::endl;
-            track_loss_ = true;
+bool FrontEndEstimator::judgeTrackingLoss(const uint16_t& good_matched_points_num,
+                                                                                            const uint16_t& all_points_num) {
+    // return false;
+    float curr_track_quality_factor = 
+        (float)good_matched_points_num / all_points_num; 
+
+    if (track_loss_) {
+        if (curr_track_quality_factor > 0.8) {
+            track_loss_ = false;
+            last_track_quality_factor_ = curr_track_quality_factor;  
             return true;  
         }
     }
-    std::cout << "last_track_quality_factor: " << last_track_quality_factor << ",curr_track_quality_factor: "
-        << curr_track_quality_factor << std::endl;
-    // 质量
-    if (curr_track_quality_factor < 2 && curr_track_quality_factor < last_track_quality_factor * 0.5) {
-        // track_loss_ = true;  
-        // return true; 
+
+    // 初始化
+    if (last_track_quality_factor_ < 0) {
+        if (good_matched_points_num == 0) {
+            return false;  
+        }
+        // 点的质量必须要良好才能初始化
+        if (curr_track_quality_factor > 0.8) { 
+            last_track_quality_factor_ = curr_track_quality_factor;
+            return false;    // 没有丢失位姿
+        } else {
+            return true;  // 丢失位姿
+        }
     }
-    last_track_quality_factor = curr_track_quality_factor;
+    // LOG(INFO) << "last_track_quality_factor_: " << last_track_quality_factor_ << ",curr_track_quality_factor: "
+        // << curr_track_quality_factor;
+    spdlog::info("last_track_quality_factor_: {}, curr_track_quality_factor: {}", 
+        last_track_quality_factor_, curr_track_quality_factor);
+    // 判断位姿丢失的条件 : 当前良好匹配点占比小于0.3 并且 这个占比前后变化巨大   
+    if (curr_track_quality_factor < 0.6 && curr_track_quality_factor < last_track_quality_factor_ * 0.65) {
+        track_loss_ = true;  
+        last_track_quality_factor_ = -1;
+        spdlog::info("定位丢失！");
+        // LOG(INFO) << "tracking lost !!!!";
+        return true; 
+    }
+    last_track_quality_factor_ = curr_track_quality_factor;
     return false;
 }
 
@@ -891,6 +913,43 @@ bool FrontEndEstimator::extractSensorData(std::deque<DataT_>& data_cache,
     return true;  
 }
 
+/**
+ * @brief 从数据缓存中找出时间戳为 timestamp 的数据
+ * 
+ * @tparam DataT_ 
+ * @param data_cache 
+ * @param data 
+ * @param timestamp 
+ * @return true 
+ * @return false 
+ */
+template<class DataT_>
+bool FrontEndEstimator::extractSensorData(const std::deque<DataT_>& data_cache, 
+                                                                                            DataT_& data, const double& timestamp) {
+    if (data_cache.front().time_stamp_ > timestamp || data_cache.back().time_stamp_ < timestamp) {
+        return false;
+    }
+    int i = 0;
+    for (i = 0;  i < data_cache.size(); ++i) {
+        if (data_cache[i].time_stamp_ >= timestamp) {
+            break;  
+        }
+    }
+    if (data_cache[i].time_stamp_ == timestamp) {
+        data = data_cache[i];  
+    } else {
+        if (data_cache[i - 1].time_stamp_ + 0.002 > timestamp) {
+            data = data_cache[i - 1];  
+        } else {
+            // 插值
+            data = util::LinearInterpolate(data_cache[i - 1], data_cache[i], 
+                                                                        data_cache[i - 1].time_stamp_ , data_cache[i].time_stamp_, 
+                                                                        timestamp);
+        }
+    }
+
+    return true;
+}
 
 /**
  * @brief 
@@ -934,9 +993,19 @@ void FrontEndEstimator::poseOdomToPrimeLaserOdom(const msa2d::Pose2d& pose_in_od
  * @brief 
  * 
  */
+void FrontEndEstimator::Reset() {
+    // std::cout << "FrontEndEstimator reset " << std::endl;
+    reset_flag_ = true;  
+}
+
 void FrontEndEstimator::reset() {
+    imu_initialized_ = false;  
+    system_initialized_ = false; 
+    last_attitude_predict_time_ = 0;   
+    last_track_quality_factor_ = -1;
     last_map_updata_pose_.SetVec(Eigen::Vector3f(FLT_MAX, FLT_MAX, FLT_MAX));
     last_fusionOdom_pose_.pose_.SetVec(Eigen::Vector3f::Zero());
+    ekf_estimator_.reset();  
     //重置地图
     grid_map_pyramid_->reset();
 }

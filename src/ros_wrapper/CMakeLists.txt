@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0.2)
+cmake_minimum_required(VERSION 3.22)
 project(ros_wrapper)
 # ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -32,6 +32,11 @@ else()
   set(EIGEN3_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIR})
 endif()
 find_package(glog  REQUIRED)
+find_package(cv_bridge REQUIRED)
+find_package(OpenCV 3.2 REQUIRED)
+
+# message("CMAKE_PREFIX_PATH: " ${CMAKE_PREFIX_PATH})
+
 ###########
 ## Build ##
 ###########
@@ -47,7 +52,9 @@ include_directories(
   ${libnabo_INCLUDE_DIRS}
   ${FrontEnd2D_INCLUDE_DIR}
   ${MSALib_INCLUDE_DIR}
+  ${OpenCV_INCLUDE_DIRS}
 )
+
 
 ## occupancy_grid
 # add_executable(occupancy_grid_node
@@ -69,9 +76,20 @@ add_dependencies(slam2d_node
   ${catkin_EXPORTED_TARGETS}
 )
 
+
+target_link_directories(slam2d_node PUBLIC
+  /opt/ros/melodic/lib
+  # /home/lwh/cross_compile/usr/local/lib
+  # /home/lwh/cross_compile/usr/lib/aarch64-linux-gnu
+  # /home/lwh/cross_compile/usr/lib/aarch64-linux-gnu/atlas
+  # /home/lwh/cross_compile/usr/lib
+)
+
 target_link_libraries(slam2d_node
   ${catkin_LIBRARIES}
   ${Boost_LIBRARIES}
+  ${OpenCV_LIBS}
+  cv_bridge
   Estimator2D
 )
 
@@ -83,8 +101,5 @@ install(TARGETS slam2d_node
 	ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
 	LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
 	RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-	)
-
-
-
+)
 

@@ -59,10 +59,9 @@ include_directories(
 
 # message("%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%libnabo_INCLUDE_DIRS:" ${libnabo_INCLUDE_DIRS})
-
-
 add_library(Estimator2D SHARED 
   src/estimator.cpp) 
+  
 target_link_libraries(Estimator2D PUBLIC
   yaml-cpp
   msa2d_lib
@@ -71,7 +70,6 @@ target_link_libraries(Estimator2D PUBLIC
   #############
   ## INSTALL ##
   #############
-
   install(
     TARGETS
       Estimator2D
@@ -80,6 +78,6 @@ target_link_libraries(Estimator2D PUBLIC
     LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   )
 
-  # install headers
-  install(DIRECTORY include/FrontEnd2D
-          DESTINATION ${CATKIN_GLOBAL_INCLUDE_DESTINATION})
+  # # install headers
+  # install(DIRECTORY include/FrontEnd2D
+  #         DESTINATION ${CATKIN_GLOBAL_INCLUDE_DESTINATION})
