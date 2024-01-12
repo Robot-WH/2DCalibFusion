@@ -1,6 +1,6 @@
 sensor:
     laser:
-        valid_distance: 3    # 激光的有效距离 
+        valid_distance: 15    # 激光的有效距离 
 # 传感器外参
 extrinsic:
   odom: 
@@ -20,7 +20,7 @@ grid_map_pyramid:
 kalman_filter:   
   type: "ekf"     # ekf / eskf
   coordinate: "globalcentric"     # 参考坐标系  globalcentric / robocentric
-  enable: false
+  enable: true
 
 process:
   filter:

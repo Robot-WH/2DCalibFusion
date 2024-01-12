@@ -216,20 +216,51 @@ void RosWrapper::wheelOdomRosCallback(const nav_msgs::Odometry& odom_msg) {
         last_time = 0;
         return;  
     }
+    msa2d::sensor::WheelOdom odom;
     double curr_time = odom_msg.header.stamp.toSec();
 
     if (curr_time <= last_time) {
-        // std::cout << common::RED << "------------------------IMU时间戳混乱!--------------------------" << std::endl; 
+        // std::cout << common::RED << "------------------------轮速计时间戳混乱!--------------------------" << std::endl; 
         return;  
     }
 
-    last_time = curr_time;
+    static float last_x = 0;
+    static float last_y = 0;
+    static float last_yaw = 0;
 
-    msa2d::sensor::WheelOdom odom; 
-    odom.time_stamp_ = curr_time;
-    odom.v_x_ = odom_msg.twist.twist.linear.x;
-    odom.omega_yaw_ = odom_msg.twist.twist.angular.z;  
-    estimator_->InputWheelOdom(odom);
+    Eigen::Quaternionf orientation;  
+    orientation.x() = odom_msg.pose.pose.orientation.x;  
+    orientation.y() = odom_msg.pose.pose.orientation.y;  
+    orientation.z() = odom_msg.pose.pose.orientation.z;  
+    orientation.w() = odom_msg.pose.pose.orientation.w;
+    orientation.normalize(); 
+    Eigen::Vector3f eulerAngle = orientation.matrix().eulerAngles(0,1,2);    // 分解为 0 <- 1 <- 2 顺序的欧拉角
+
+    odom.pose_.SetTransform(odom_msg.pose.pose.position.x, odom_msg.pose.pose.position.y);
+    odom.pose_.SetRotation(eulerAngle[2]); 
+
+    if (last_time != 0) {
+        double dt = curr_time - last_time; 
+        odom.v_x_ = std::sqrt(std::pow((odom_msg.pose.pose.position.x - last_x) / dt, 2) + 
+                                    std::pow((odom_msg.pose.pose.position.y - last_y) / dt, 2));
+        odom.v_y_ = 0;
+        float delta_angle = odom.pose_.yaw() - last_yaw; 
+        if (delta_angle > M_PI) {
+            delta_angle = delta_angle - 2 * M_PI; 
+        }
+        if (delta_angle < -M_PI) {
+            delta_angle = 2 * M_PI + delta_angle; 
+        }
+        odom.omega_yaw_ = delta_angle / dt;
+        odom.time_stamp_ = (curr_time + last_time) / 2;  
+        // std::cout << common::YELLOW << "odom.time_stamp_: " 
+        // << odom.time_stamp_ << common::RESET << std::endl;
+        estimator_->InputWheelOdom(odom);
+    }
+    last_x = odom_msg.pose.pose.position.x;
+    last_y = odom_msg.pose.pose.position.y;
+    last_yaw = odom.pose_.yaw(); 
+    last_time = curr_time;  
 }
 
 void RosWrapper::imuRosCallback(const sensor_msgs::Imu& imu_msg) {
@@ -454,6 +485,11 @@ void RosWrapper::undistortedPointcloudCallback(const msa2d::sensor::LaserScan& d
     undistorted_pointcloud_publisher_.publish(pointcloud_msg);
 }
 
+/**
+ * @brief 
+ * 
+ * @param data 
+ */
 void RosWrapper::dynamicPointsCallback(const std::pair<std::vector<Eigen::Vector2f>, double>& data) {
     sensor_msgs::PointCloud pointcloud_msg;
     uint16_t size = data.first.size(); 
@@ -617,11 +653,11 @@ bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan
             point.rel_time_ = i * laser_info_.time_increment_; 
             laser.pointcloud_.push_back(std::move(point)); 
         }
-        laser.end_time_ = laser.start_time_ + laser.pointcloud_.back().rel_time_;  
+        laser.end_time_ = laser.start_time_ + laser_info_.laser_period_;  
     } else {
         for (int i = last_index; i >= 0; --i) {
             // if (i > laser_info_.valid_ind_upper_) continue;
-            if (i < 2 * laser_info_.valid_ind_lower_) continue;
+            // if (i < 2 * laser_info_.valid_ind_lower_) continue;
             // 距离滤波 
             if (!std::isfinite(scan_msg.ranges[i]) ||
                 scan_msg.ranges[i] < laser_min_dist_ ||
@@ -639,7 +675,7 @@ bool RosWrapper::rosPointCloudToDataContainer(const sensor_msgs::LaserScan& scan
         // laser.end_time_ = laser.start_time_;  
         // laser.start_time_ = scan_msg.header.stamp.toSec() - laser.pointcloud_.back().rel_time_;
         laser.start_time_ = scan_msg.header.stamp.toSec();
-        laser.end_time_ = laser.start_time_ + laser.pointcloud_.back().rel_time_;  
+        laser.end_time_ = laser.start_time_ + laser_info_.laser_period_;  
     }
     laser.scan_period_ = laser_info_.laser_period_;  
     return true;

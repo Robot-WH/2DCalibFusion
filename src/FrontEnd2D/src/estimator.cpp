@@ -223,7 +223,6 @@ void FrontEndEstimator::run() {
                 } else {
                     std::cout << msa2d::color::YELLOW << "无IMU， 无轮速.." << msa2d::color::RESET << std::endl; 
                 }
-            
                 // 在没有IMU以及轮速的情况下  会使用运动学模型预测
                 if (use_motion_model_predict) {
                     if (ekf_estimator_ != nullptr) {
@@ -232,7 +231,6 @@ void FrontEndEstimator::run() {
                         ekf_estimator_->Predict(curr_laser_ptr->start_time_, curr_laser_ptr->end_time_, diff_model);
                     }
                 } 
-                
                 /**
                  * @todo 地面校准 
                  * 
@@ -345,7 +343,6 @@ void FrontEndEstimator::run() {
                             imu_calib_ = true;  
                         }
                     } 
-            
                     // 在IMU&odom初始化前，这里执行的是基于先验运动模型的EKF
                     if (ekf_estimate_enable_ && ekf_estimator_ != nullptr) {
                         // 观测协方差矩阵
