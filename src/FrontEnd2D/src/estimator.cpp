@@ -216,7 +216,8 @@ void FrontEndEstimator::run() {
                                 variation_pitch_ = attitude_pitch_ - origin_pitch_;
                                 // std::cout << "姿态变化，pitch：" << variation_pitch_ << ", roll: " << variation_roll_ << std::endl;
                             }
-                        }      
+                        } 
+                        std::cout << "预测完成" << std::endl;     
                     } else {
                         std::cout << msa2d::color::YELLOW << "IMU未初始化 ..." << msa2d::color::RESET << std::endl;
                     }
@@ -817,23 +818,32 @@ void FrontEndEstimator::systemInit(const msa2d::Pose2d& laser_pose,
 bool FrontEndEstimator::syncSensorData(const msa2d::sensor::LaserScan::Ptr& laser_ptr, 
                                                                                         std::deque<msa2d::sensor::WheelOdom>& wheelOdom_container,
                                                                                         std::deque<msa2d::sensor::ImuData>& imu_container) {
-    bool wheel_extract_finish = true;
-    bool imu_extract_finish = true; 
+    static bool wheel_extract_finish = false;
+    static bool imu_extract_finish = false; 
     // 提取轮速数据
+    std::cout << "extract wheel ... " << wheel_extract_finish << std::endl;
     wheel_sm_.lock();
-    if (!extractSensorData<msa2d::sensor::WheelOdom>(wheelOdom_cache_, wheelOdom_container,
-            laser_ptr->start_time_, laser_ptr->end_time_)) {
-        wheel_extract_finish = false; 
+    if (!wheel_extract_finish && extractSensorData<msa2d::sensor::WheelOdom>(wheelOdom_cache_, 
+            wheelOdom_container, laser_ptr->start_time_, laser_ptr->end_time_)) {
+        wheel_extract_finish = true; 
     }
     wheel_sm_.unlock();
     // 提取IMU数据
+    std::cout << "extract imu... " << imu_extract_finish << std::endl;
     imu_sm_.lock();
-    if (!extractSensorData<msa2d::sensor::ImuData>(imu_cache_, imu_container,
+    if (!imu_extract_finish && extractSensorData<msa2d::sensor::ImuData>(imu_cache_, imu_container,
             laser_ptr->start_time_, laser_ptr->end_time_)) {
-        imu_extract_finish = false; 
+        imu_extract_finish = true; 
     }
     imu_sm_.unlock();
-    return wheel_extract_finish && imu_extract_finish; 
+
+    if (wheel_extract_finish && imu_extract_finish) {
+        wheel_extract_finish = false;
+        imu_extract_finish = false;  
+        return true;
+    }
+
+    return false; 
 }
 
 /**
@@ -898,12 +908,16 @@ bool FrontEndEstimator::extractSensorData(std::deque<DataT_>& data_cache,
                 }
                 // 最后一个数据的时间戳和激光最后一个点的时间戳对齐 
                 extracted_container.back().time_stamp_ = end_time; 
+                std::cout << "extracted_container size: " << extracted_container.size() << std::endl;
             } else {
+                std::cout << "data_cache.back().time_stamp_ < end_time" << std::endl;
                 return false;  
             }
         } else {
             std::cout << msa2d::color::YELLOW << "warn: data_cache.front().time_stamp_ > start_time!" 
                 << msa2d::color::RESET << std::endl;
+            std::cout << std::setprecision(15) << "start_time: " << start_time << std::endl;
+            std::cout << std::setprecision(15) << "data_cache.front().time_stamp_: " << data_cache.front().time_stamp_ << std::endl;
         }
     }
 
