@@ -1,4 +1,3 @@
-
 #pragma once 
 #include "TypeJudge.hpp"
 namespace util {

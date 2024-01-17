@@ -5,7 +5,7 @@
 #include "Kalman/ekf_estimator.hpp"
 #include "Sensor/2d_imu_tool.hpp"
 #include "motionModel.hpp"
-#include "Calibration/2d_handeye_calibration.hpp"
+#include "Calibration/laser_wheel_calibration.hpp"
 #include "../util/DataDispatcher.hpp"
 #include "../util/utility.hpp"
 #include "../tic_toc.h"
@@ -60,6 +60,8 @@ protected:
     void run();
 
     void reset();   
+
+    void mapSlopeCorrect(const msa2d::sensor::LaserPointCloud& pointcloud);
 
     /**
      * @brief: 快速预测失效检测
@@ -118,8 +120,9 @@ protected:
      * @details: 
      * @return {*}
      */    
-    void systemInit(const msa2d::Pose2d& laser_pose, const std::deque<msa2d::sensor::ImuData>& imu_selected,
-            const std::deque<msa2d::sensor::WheelOdom>& wheel_odom_selected, const double& time_stamp);
+    void systemInit(const msa2d::Pose2d& laser_pose, 
+                                    const std::deque<msa2d::sensor::ImuData>& imu_selected,
+                                    const double& time_stamp);
 
     /**
      * @brief: 传感器的数据同步-提取出laser一帧时间戳内的其他sensor数据
@@ -150,10 +153,10 @@ protected:
 
     void transformPathFromOdomToLaser(Path& motion_info);
     // 激光雷达的运动转到Odom系
-    void posePrimeLaserToOdom(const msa2d::Pose2d& pose_in_laser, msa2d::Pose2d& pose_in_world);
+    void laserPoseToOdomPlane(const msa2d::Pose2d& pose_in_laser, msa2d::Pose2d& pose_in_world);
 
     // odom系的运动转到激光系 
-    void poseOdomToPrimeLaserOdom(const msa2d::Pose2d& pose_in_odom, msa2d::Pose2d& pose_in_laser);
+    void odomPoseToLaserPlane(const msa2d::Pose2d& pose_in_odom, msa2d::Pose2d& pose_in_laser);
 
     /**
      * @brief: 将当前的输入点云 转换成2D栅格金字塔数据 
@@ -188,9 +191,10 @@ private:
     bool ekf_estimate_enable_ = true;    // 默认使用ekf估计  
     bool system_initialized_ = false;  
     bool imu_initialized_ = false;
-    bool has_odomExtrinsicParam_ = true; 
+    bool wheel_calib_ = true; 
     bool imu_calib_ = false;  
     bool track_loss_ = false;    // 位姿丢失
+    bool map_correct_ = true;  
     std::atomic<bool> reset_flag_ = false;  
     Eigen::Isometry2f primeLaserOdomExtrinsic_;  
     // Eigen::Isometry3f primeLaserOdomExtrinsic_;  
@@ -228,6 +232,8 @@ private:
     std::unique_ptr<EKFEstimatorBase> ekf_estimator_; 
     sensor::ImuTool2D imu_tool_; 
     std::unique_ptr<msa2d::filter::VoxelGridFilter> voxel_filter_; 
+    laserWheelCalib laser_wheel_calib_;  
+    laserWheelCalib::Res laser_wheel_param_;  
     std::thread run_;  
 };
 }

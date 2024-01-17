@@ -23,7 +23,7 @@
         <param name="scan_frame" value="front_laser_link"/>
         <param name="use_max_scan_range" value="20"/>
         <param name="laser_min_dist" value="0.2"/>
-        <param name="laser_max_dist" value="20"/>
+        <param name="laser_max_dist" value="30"/>
         <param name="laser_imaging_reversed" value="true"/>      
 
         <param name="map_pub_period" value="2"/>

@@ -132,7 +132,6 @@ public:
         //     << last_time_ << std::endl;
         // 若观测与上次预测的时间戳相差不到1ms，认为观测有效
         if (std::fabs(time_stamp - last_time_) >= 1e-3) {
-            throw "EKF correct time error!";
         }
 
         last_time_ = time_stamp;  
@@ -329,7 +328,6 @@ public:
         //     << last_time_ << std::endl;
         // 若观测与上次预测的时间戳相差不到1ms，认为观测有效
         if (std::fabs(time_stamp - last_time_) >= 1e-3) {
-            throw "EKF correct time error!";
         }
 
         last_time_ = time_stamp;  

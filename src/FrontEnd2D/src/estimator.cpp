@@ -150,43 +150,44 @@ void FrontEndEstimator::run() {
                  * 纯laser模式：运动模型预测+laser校正
                  */
                 DiffModelDeadReckoning diff_model;  // 差分模型
+                DiffModelDeadReckoning wheel_diff_model;  // 轮速差分模型   只在有轮速，且标定完成时使用(标定完成后只在雷达退化或高速时启用)
                 bool use_motion_model_predict = true;  
 
                 // 如果 有轮速数据，且odom与激光的外参已知  那么用轮速进行预测
                 if (!wheel_odom_selected.empty()) {
-                    if (has_odomExtrinsicParam_) {
-                        if (!imu_selected.empty()) {
-                            std::cout << msa2d::color::GREEN << "使用轮速计 + IMU 预测 ..." << msa2d::color::RESET << std::endl; 
-                        } else {
-                            std::cout << msa2d::color::GREEN << "使用轮速计预测 ..." << msa2d::color::RESET << std::endl; 
-                        }
-                        use_motion_model_predict = false;  
-                        // 使用轮速进行预测
-                        for (uint16_t i = 0; i < wheel_odom_selected.size(); ++i) {
-                            auto& curr_data = wheel_odom_selected[i]; 
-                            // 如果有imu数据，用imu的角速度观测替换轮速计的角速度
-                            if (!imu_selected.empty()) {
-                                msa2d::sensor::ImuData imu_data;
-                                if (extractSensorData(imu_selected, imu_data, curr_data.time_stamp_)) {
-                                    curr_data.omega_yaw_ = imu_data.gyro_[2] - sensor_param_.imu_.gyro_bias_[2];  
-                                    std::cout << "轮速  IMU" << std::endl;
-                                } else {
-                                    std::cout << "轮速获取IMU数据失败" << std::endl;
-                                }
-                            }
-                            // 运动学前向传播
-                            diff_model.Update(curr_data.time_stamp_, curr_data.v_x_, curr_data.omega_yaw_); 
-                            // EKF预测
-                            /**
-                             * @brief 对于轮速 需要考虑优化外参和不优化外参
-                             */
-                            if (ekf_estimator_ != nullptr) {
-                                ekf_estimator_->Predict(diff_model.ReadLastPose().pose_, curr_data.v_x_, 
-                                    curr_data.omega_yaw_, 0.0025, 1, curr_data.time_stamp_);    // 测量噪声 0.05m/s, 60度/s
+                    // std::cout << msa2d::color::GREEN << "使用轮速计" << msa2d::color::RESET << std::endl; 
+                    // 使用轮速进行预测
+                    for (uint16_t i = 0; i < wheel_odom_selected.size(); ++i) {
+                        auto& curr_data = wheel_odom_selected[i]; 
+                        // 如果有imu数据，且当前不出于轮速标定状态，用imu的角速度观测替换轮速计的角速度
+                        if (!imu_selected.empty() && !wheel_calib_) {
+                            msa2d::sensor::ImuData imu_data;
+                            if (extractSensorData(imu_selected, imu_data, curr_data.time_stamp_)) {
+                                curr_data.omega_yaw_ = imu_data.gyro_[2] - sensor_param_.imu_.gyro_bias_[2];  
+                                // std::cout << "轮速  IMU" << std::endl;
+                            } else {
+                                // std::cout << "轮速获取IMU数据失败" << std::endl;
                             }
                         }
-                    }
-                } else if (!imu_selected.empty()) {
+                        // 运动学前向传播
+                        wheel_diff_model.Update(curr_data.time_stamp_, curr_data.v_x_, curr_data.omega_yaw_); 
+                        // // EKF预测
+                        // /**
+                        //  * @brief 对于轮速 需要考虑优化外参和不优化外参
+                        //  */
+                        // if (ekf_estimator_ != nullptr) {
+                        //     ekf_estimator_->Predict(diff_model.ReadLastPose().pose_, curr_data.v_x_, 
+                        //         curr_data.omega_yaw_, 0.0025, 1, curr_data.time_stamp_);    // 测量噪声 0.05m/s, 60度/s
+                        // }
+                    } 
+
+                    static msa2d::TimedPose2d last_wheel_pose;
+                    last_wheel_pose.pose_ = last_wheel_pose.pose_ * wheel_diff_model.ReadLastPose().pose_;
+                    last_wheel_pose.time_stamp_ = curr_laser_ptr->end_time_; 
+                    ::util::DataDispatcher::GetInstance().Publish("WheelDeadReckoning", last_wheel_pose); 
+                } 
+                
+                if (!imu_selected.empty()) {
                     // 如果IMU初始化了
                     if (imu_initialized_) {
                         // 若使用EKF滤波器  
@@ -221,9 +222,7 @@ void FrontEndEstimator::run() {
                     } else {
                         std::cout << msa2d::color::YELLOW << "IMU未初始化 ..." << msa2d::color::RESET << std::endl;
                     }
-                } else {
-                    std::cout << msa2d::color::YELLOW << "无IMU， 无轮速.." << msa2d::color::RESET << std::endl; 
-                }
+                } 
                 // 在没有IMU以及轮速的情况下  会使用运动学模型预测
                 if (use_motion_model_predict) {
                     if (ekf_estimator_ != nullptr) {
@@ -234,7 +233,6 @@ void FrontEndEstimator::run() {
                 } 
                 /**
                  * @todo 地面校准 
-                 * 
                  */
                 // 如果姿态变化超过15度，则跳过
                 if (std::fabs(variation_roll_) < 0.2618 && std::fabs(variation_pitch_) < 0.2618) {
@@ -301,7 +299,7 @@ void FrontEndEstimator::run() {
                     // std::cout << msa2d::color::YELLOW << "predict_incre_pose: " << predict_incre_pose.vec().transpose()
                     //     << msa2d::color::RESET << std::endl;
                     if (imu_calib_) {
-                        LaserUndistorted(*curr_laser_ptr, diff_model.GetPath());// 去除laser的畸变
+                        LaserUndistorted(*curr_laser_ptr, diff_model.GetPath());  // 去除laser的畸变
                     }
                     // 体素降采样滤波
                     // std::cout << "ori size: " << curr_laser_ptr->pointcloud_.size() << std::endl;
@@ -309,11 +307,15 @@ void FrontEndEstimator::run() {
                     voxel_filter_->Filter(curr_laser_ptr->pointcloud_); 
                     // tt.toc("filter ");
                     // std::cout << "filter size: " << curr_laser_ptr->pointcloud_.size() << std::endl;
+                    // 如果是第一帧激光数据，则进行地图倾斜校正
+                    if (map_correct_) {
+                        map_correct_ = false; 
+                    }
  
                     msa2d::Pose2d estimated_odom_pose = last_fusionOdom_pose_.pose_ * predict_incre_pose;   // To<-last * Tlast<-curr
-                    // 将odom系下的预测位姿转换到laser odom下
+                    // 将odom系下的预测位姿转换到laser 安装平面
                     msa2d::Pose2d new_estimate_laserOdom_pose;
-                    poseOdomToPrimeLaserOdom(estimated_odom_pose, new_estimate_laserOdom_pose);
+                    odomPoseToLaserPlane(estimated_odom_pose, new_estimate_laserOdom_pose);
                     // 基于栅格金字塔快速检测预测是否可靠，判断是否存在里程计打滑等现象
                     // fastPredictFailureDetection(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(1)); 
                     // std::cout << "odom predict: " << estimated_odom_pose.vec().transpose() << std::endl;
@@ -321,17 +323,30 @@ void FrontEndEstimator::run() {
                     getLaserPyramidData(*curr_laser_ptr);     // 构造 laser_pyramid_container_ 
                     // tt.toc("getGridPyramidData");
                     // tt.tic(); 
-                    // new_estimate_laserOdom_pose.SetVec(hector_matcher_->Solve(new_estimate_laserOdom_pose.vec(), 
-                    //     laser_pyramid_container_, *grid_map_pyramid_, lastScanMatchCov)); 
+                    new_estimate_laserOdom_pose.SetVec(hector_matcher_->Solve(new_estimate_laserOdom_pose.vec(), 
+                        laser_pyramid_container_, *grid_map_pyramid_, lastScanMatchCov)); 
                     // std::cout << "laserOdom_pose: " << new_estimate_laserOdom_pose.vec().transpose() << std::endl;
                     // 细匹配  ICP / NDT 
                     // tt.toc("match solve");
-                    // 将pose转换到odom系下
-                    posePrimeLaserToOdom(new_estimate_laserOdom_pose, estimated_odom_pose);
+                    // 将pose转换到odom平面下
+                    laserPoseToOdomPlane(new_estimate_laserOdom_pose, estimated_odom_pose);
                     // std::cout << "Odom_pose: " << estimated_odom_pose.vec().transpose() << std::endl;
                     // msa2d::Pose2d scan_matched_incre_pose = last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
                     // std::cout << msa2d::color::YELLOW << "scan_matched_incre_pose: " << scan_matched_incre_pose.vec().transpose()
                     //     << msa2d::color::RESET << std::endl;
+                    // 如果轮速需要标定
+                    if (wheel_calib_) {
+                        msa2d::Pose2d scan_matched_incre_pose = 
+                            last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
+                        if (laser_wheel_calib_.AddData(scan_matched_incre_pose, wheel_diff_model.ReadLastPose().pose_)) {
+                            laser_wheel_param_ = laser_wheel_calib_.GetParam();  
+                            wheel_calib_ = false;  
+                            std::cout << msa2d::color::GREEN << "激光-轮速标定完成！外参 x: " << laser_wheel_param_.x
+                                << ", y: " << laser_wheel_param_.y << ",theta: " << laser_wheel_param_.theta << ", 尺度 rot_scale: " 
+                                << laser_wheel_param_.rot_scale << ",trans_scale: " << laser_wheel_param_.trans_scale 
+                                << msa2d::color::RESET << std::endl;
+                        }  
+                    }
                     // 校准IMU
                     if (!imu_calib_) {
                         msa2d::Pose2d scan_matched_incre_pose = 
@@ -355,14 +370,11 @@ void FrontEndEstimator::run() {
                         ekf_estimator_->Correct(estimated_odom_pose, obs_cov, curr_laser_ptr->end_time_); 
                         estimated_odom_pose = ekf_estimator_->ReadPosterioriPose();
                         // 更新对应laser坐标
-                        poseOdomToPrimeLaserOdom(estimated_odom_pose, new_estimate_laserOdom_pose);
+                        odomPoseToLaserPlane(estimated_odom_pose, new_estimate_laserOdom_pose);
                     }
-                    // 系统初始化是指 联合imu和wheel的多传感器初始化
-                    // 系统初始化只要有imu或wheel两者之一就可以，系统初始化后，
-                    // 即使之后出现新的传感器数据，也不会重新初始化
+                    // 针对IMU  
                     if (!system_initialized_) {
-                        systemInit(new_estimate_laserOdom_pose, imu_selected, 
-                                                wheel_odom_selected, curr_laser_ptr->end_time_);
+                        systemInit(new_estimate_laserOdom_pose, imu_selected, curr_laser_ptr->end_time_);
                     }
                     // 利用栅格金子塔进行点云分类
                     std::pair<std::vector<Eigen::Vector2f>, double> dynamic_points_data;    // 动态点
@@ -393,7 +405,6 @@ void FrontEndEstimator::run() {
                     ::util::DataDispatcher::GetInstance().Publish("stable_pointcloud", stable_points_data); 
                     // ::util::DataDispatcher::GetInstance().Publish("local_map", local_map_.ReadLocalMap()); 
                     // ::util::DataDispatcher::GetInstance().Publish("undetermined_pointcloud", undetermined_points_data); 
-
                     // 判断位姿是否丢失
                     if (!judgeTrackingLoss(stable_points_data.first.size(), curr_laser_ptr->pointcloud_.size())) {
                         /** 2.地图更新(last_map_updata_pose_初始化为一个很大的值，因此第一帧点云就会更新地图) **/
@@ -421,10 +432,24 @@ void FrontEndEstimator::run() {
                 wheel_odom_selected.clear(); 
                 imu_selected.clear();  
                 // tt.toc("map update");
+                // std::cout << "本轮处理完成" << std::endl;
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
+}
+
+
+void FrontEndEstimator::mapSlopeCorrect(const msa2d::sensor::LaserPointCloud& pointcloud) {
+    Eigen::Vector2f line_front_point;
+    float curr_line_tan_slope = -1;
+
+    // for () {
+    //     float tan_slope = (point.y - line_front_point.y) / (point.x- line_front_point.x);
+    //     if (std::fabs(tan_slope - curr_line_tan_slope) < 0.01) {
+
+    //     }
+    // }
 }
 
 /**
@@ -688,9 +713,9 @@ void FrontEndEstimator::LaserUndistorted(msa2d::sensor::LaserScan& laser,
     if (motion_info.size() == 0) {
         return;  
     }
-    // 将odom系下的path转换到lidar系
+    // 将odom下的path转换到lidar平面
     for (auto& it : motion_info) {
-        poseOdomToPrimeLaserOdom(it.pose_, it.pose_);  
+        odomPoseToLaserPlane(it.pose_, it.pose_);  
     }
     msa2d::Pose2d begin_pose = motion_info.back().pose_;     // T_begin<-end
     // 相邻的两个motion数据  靠近motion_info.back() 为 front ,靠近 motion_info.front() 的为 back 
@@ -757,7 +782,6 @@ void FrontEndEstimator::laserLevelCorrection(msa2d::sensor::LaserScan& laser) {
  */
 void FrontEndEstimator::systemInit(const msa2d::Pose2d& laser_pose, 
                                                                             const std::deque<msa2d::sensor::ImuData>& imu_selected,
-                                                                            const std::deque<msa2d::sensor::WheelOdom>& wheel_odom_selected, 
                                                                             const double& time_stamp) {
     // 初始化
     static msa2d::Pose2d last_laser_pose = laser_pose; 
@@ -772,31 +796,21 @@ void FrontEndEstimator::systemInit(const msa2d::Pose2d& laser_pose,
             // 初始化时 放置的地面的倾斜度要小与3度  
             if (std::fabs(origin_roll_) < 0.0524 && std::fabs(origin_pitch_) < 0.0524) {
                 imu_initialized_ = true; 
+                system_initialized_ = true; 
+                work_mode = MODE::lio; 
                 origin_R_gb_ = sensor_param_.imu_.R_gb_;  
                 std::cout << msa2d::color::GREEN << "IMU初始化成功, 角速度bias: " 
-                << sensor_param_.imu_.gyro_bias_.transpose() << ", 姿态角 pitch: " << origin_pitch_
-                << ", roll: " << origin_roll_ << msa2d::color::RESET << std::endl;
+                    << sensor_param_.imu_.gyro_bias_.transpose() << ", 姿态角 pitch: " << origin_pitch_
+                    << ", roll: " << origin_roll_ << msa2d::color::RESET << std::endl;
             }
         }
     } 
-
-    if (!wheel_odom_selected.empty()) {
-    } else {
-        // 没有轮速且IMU初始化完成的情况下，那么可以确认进入LIO模式
-        if (imu_initialized_) {
-            system_initialized_ = true; 
-            work_mode = MODE::lio; 
-        }
-    }
 
     if (ekf_estimate_enable_) {
         // LIO EKF估计器初始化
         if (work_mode == MODE::lio) {
             ekf_estimator_ = std::make_unique<EKFEstimatorPVQB>(
                 laser_pose, 0, 0, sensor_param_.imu_.gyro_bias_[2], 1e-4, time_stamp); 
-        }
-        // LWIO EKF估计器 初始化
-        if (work_mode == MODE::lwio) {
         }
         // 如果之前IMU和轮速并为初始化成功，那么先初始化运动学模型的EKF进行使用
         if (ekf_estimator_ == nullptr) { 
@@ -968,7 +982,7 @@ bool FrontEndEstimator::extractSensorData(const std::deque<DataT_>& data_cache,
  * @param pose_in_laser 
  * @param pose_in_world 
  */
-void FrontEndEstimator::posePrimeLaserToOdom(const msa2d::Pose2d& pose_in_laser, 
+void FrontEndEstimator::laserPoseToOdomPlane(const msa2d::Pose2d& pose_in_laser, 
                                                                                                             msa2d::Pose2d& pose_in_world) {
     pose_in_world.SetX(pose_in_laser.x());
     if (prime_laser_upside_down_) {
@@ -987,7 +1001,7 @@ void FrontEndEstimator::posePrimeLaserToOdom(const msa2d::Pose2d& pose_in_laser,
  * @param pose_in_odom 
  * @param pose_in_laser 
  */
-void FrontEndEstimator::poseOdomToPrimeLaserOdom(const msa2d::Pose2d& pose_in_odom, 
+void FrontEndEstimator::odomPoseToLaserPlane(const msa2d::Pose2d& pose_in_odom, 
                                                                                                                         msa2d::Pose2d& pose_in_laser) {
     pose_in_laser.SetX(pose_in_odom.x());
     if (prime_laser_upside_down_) {

@@ -242,7 +242,7 @@ void RosWrapper::wheelOdomRosCallback(const nav_msgs::Odometry& odom_msg) {
     if (last_time != 0) {
         double dt = curr_time - last_time; 
         odom.v_x_ = std::sqrt(std::pow((odom_msg.pose.pose.position.x - last_x) / dt, 2) + 
-                                    std::pow((odom_msg.pose.pose.position.y - last_y) / dt, 2));
+                                    std::pow((odom_msg.pose.pose.position.y - last_y) / dt, 2)) * 0.5;
         odom.v_y_ = 0;
         float delta_angle = odom.pose_.yaw() - last_yaw; 
         if (delta_angle > M_PI) {
@@ -251,7 +251,7 @@ void RosWrapper::wheelOdomRosCallback(const nav_msgs::Odometry& odom_msg) {
         if (delta_angle < -M_PI) {
             delta_angle = 2 * M_PI + delta_angle; 
         }
-        odom.omega_yaw_ = delta_angle / dt;
+        odom.omega_yaw_ = 1.8 * delta_angle / dt;
         odom.time_stamp_ = (curr_time + last_time) / 2;  
         // std::cout << common::YELLOW << "odom.time_stamp_: " 
         // << odom.time_stamp_ << common::RESET << std::endl;
