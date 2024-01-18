@@ -17,10 +17,11 @@ struct rotCmp {
 class laserWheelCalib {
 public:
     struct Res {
-        float rot_scale;   // 旋转尺度 
-        float trans_scale;   // 线速度尺度 
-        float x, y, theta;     // 外参
+        float rot_scale = 1;   // 旋转尺度 
+        float trans_scale = 1;   // 线速度尺度 
+        float x = 0, y = 0, theta = 0;     // 外参
     };
+    
     /**
      * @brief 
      * 

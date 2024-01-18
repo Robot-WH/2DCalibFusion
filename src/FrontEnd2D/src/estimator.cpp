@@ -103,6 +103,7 @@ void FrontEndEstimator::InputWheelOdom(msa2d::sensor::WheelOdom& data) {
  */
 void FrontEndEstimator::InputImu(msa2d::sensor::ImuData& data) {
     imu_sm_.lock();
+    std::cout << "imu InputImu, acc: " << data.acc_.norm() << std::endl;
     imu_cache_.push_back(std::move(data));
     imu_sm_.unlock();  
 }
@@ -152,6 +153,7 @@ void FrontEndEstimator::run() {
                 DiffModelDeadReckoning diff_model;  // 差分模型
                 DiffModelDeadReckoning wheel_diff_model;  // 轮速差分模型   只在有轮速，且标定完成时使用(标定完成后只在雷达退化或高速时启用)
                 bool use_motion_model_predict = true;  
+                static msa2d::TimedPose2d last_wheel_pose;
 
                 // 如果 有轮速数据，且odom与激光的外参已知  那么用轮速进行预测
                 if (!wheel_odom_selected.empty()) {
@@ -159,6 +161,7 @@ void FrontEndEstimator::run() {
                     // 使用轮速进行预测
                     for (uint16_t i = 0; i < wheel_odom_selected.size(); ++i) {
                         auto& curr_data = wheel_odom_selected[i]; 
+                        curr_data.omega_yaw_ *= laser_wheel_param_.rot_scale; 
                         // 如果有imu数据，且当前不出于轮速标定状态，用imu的角速度观测替换轮速计的角速度
                         if (!imu_selected.empty() && !wheel_calib_) {
                             msa2d::sensor::ImuData imu_data;
@@ -170,7 +173,8 @@ void FrontEndEstimator::run() {
                             }
                         }
                         // 运动学前向传播
-                        wheel_diff_model.Update(curr_data.time_stamp_, curr_data.v_x_, curr_data.omega_yaw_); 
+                        wheel_diff_model.Update(curr_data.time_stamp_, laser_wheel_param_.trans_scale * curr_data.v_x_, 
+                                                                                curr_data.omega_yaw_); 
                         // // EKF预测
                         // /**
                         //  * @brief 对于轮速 需要考虑优化外参和不优化外参
@@ -181,7 +185,6 @@ void FrontEndEstimator::run() {
                         // }
                     } 
 
-                    static msa2d::TimedPose2d last_wheel_pose;
                     last_wheel_pose.pose_ = last_wheel_pose.pose_ * wheel_diff_model.ReadLastPose().pose_;
                     last_wheel_pose.time_stamp_ = curr_laser_ptr->end_time_; 
                     ::util::DataDispatcher::GetInstance().Publish("WheelDeadReckoning", last_wheel_pose); 
@@ -215,7 +218,9 @@ void FrontEndEstimator::run() {
                             if (i == imu_selected.size() - 1) {
                                 variation_roll_ = attitude_roll_ - origin_roll_;
                                 variation_pitch_ = attitude_pitch_ - origin_pitch_;
-                                // std::cout << "姿态变化，pitch：" << variation_pitch_ << ", roll: " << variation_roll_ << std::endl;
+                                std::cout << "attitude_roll_: " << attitude_roll_ << ",attitude_pitch_: " << attitude_pitch_ << std::endl;
+                                std::cout << "origin_roll_: " << origin_roll_ << ",origin_pitch_: " << origin_pitch_ << std::endl;
+                                std::cout << "姿态变化，pitch：" << variation_pitch_ << ", roll: " << variation_roll_ << std::endl;
                             }
                         } 
                         std::cout << "预测完成" << std::endl;     
@@ -296,8 +301,8 @@ void FrontEndEstimator::run() {
 
                     msa2d::Pose2d predict_incre_pose;   // 预测帧间的运动 
                     predict_incre_pose = diff_model.ReadLastPose().pose_;
-                    // std::cout << msa2d::color::YELLOW << "predict_incre_pose: " << predict_incre_pose.vec().transpose()
-                    //     << msa2d::color::RESET << std::endl;
+                    std::cout << msa2d::color::YELLOW << "predict_incre_pose: " << predict_incre_pose.vec().transpose()
+                        << msa2d::color::RESET << std::endl;
                     if (imu_calib_) {
                         LaserUndistorted(*curr_laser_ptr, diff_model.GetPath());  // 去除laser的畸变
                     }
@@ -318,14 +323,14 @@ void FrontEndEstimator::run() {
                     odomPoseToLaserPlane(estimated_odom_pose, new_estimate_laserOdom_pose);
                     // 基于栅格金字塔快速检测预测是否可靠，判断是否存在里程计打滑等现象
                     // fastPredictFailureDetection(curr_laser_ptr, new_estimate_laserOdom_pose, grid_map_pyramid_->getGridMap(1)); 
-                    // std::cout << "odom predict: " << estimated_odom_pose.vec().transpose() << std::endl;
+                    std::cout << "odom predict: " << estimated_odom_pose.vec().transpose() << std::endl;
                     // 将点云数据转换为激光多分辨率金字塔数据
                     getLaserPyramidData(*curr_laser_ptr);     // 构造 laser_pyramid_container_ 
                     // tt.toc("getGridPyramidData");
                     // tt.tic(); 
                     new_estimate_laserOdom_pose.SetVec(hector_matcher_->Solve(new_estimate_laserOdom_pose.vec(), 
                         laser_pyramid_container_, *grid_map_pyramid_, lastScanMatchCov)); 
-                    // std::cout << "laserOdom_pose: " << new_estimate_laserOdom_pose.vec().transpose() << std::endl;
+                    std::cout << "laserOdom_pose: " << new_estimate_laserOdom_pose.vec().transpose() << std::endl;
                     // 细匹配  ICP / NDT 
                     // tt.toc("match solve");
                     // 将pose转换到odom平面下
@@ -334,19 +339,6 @@ void FrontEndEstimator::run() {
                     // msa2d::Pose2d scan_matched_incre_pose = last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
                     // std::cout << msa2d::color::YELLOW << "scan_matched_incre_pose: " << scan_matched_incre_pose.vec().transpose()
                     //     << msa2d::color::RESET << std::endl;
-                    // 如果轮速需要标定
-                    if (wheel_calib_) {
-                        msa2d::Pose2d scan_matched_incre_pose = 
-                            last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
-                        if (laser_wheel_calib_.AddData(scan_matched_incre_pose, wheel_diff_model.ReadLastPose().pose_)) {
-                            laser_wheel_param_ = laser_wheel_calib_.GetParam();  
-                            wheel_calib_ = false;  
-                            std::cout << msa2d::color::GREEN << "激光-轮速标定完成！外参 x: " << laser_wheel_param_.x
-                                << ", y: " << laser_wheel_param_.y << ",theta: " << laser_wheel_param_.theta << ", 尺度 rot_scale: " 
-                                << laser_wheel_param_.rot_scale << ",trans_scale: " << laser_wheel_param_.trans_scale 
-                                << msa2d::color::RESET << std::endl;
-                        }  
-                    }
                     // 校准IMU
                     if (!imu_calib_) {
                         msa2d::Pose2d scan_matched_incre_pose = 
@@ -372,6 +364,20 @@ void FrontEndEstimator::run() {
                         // 更新对应laser坐标
                         odomPoseToLaserPlane(estimated_odom_pose, new_estimate_laserOdom_pose);
                     }
+                    // 如果轮速需要标定
+                    // if (wheel_calib_) {
+                    //     msa2d::Pose2d scan_matched_incre_pose = 
+                    //         last_fusionOdom_pose_.pose_.inv() * estimated_odom_pose;
+                    //     if (laser_wheel_calib_.AddData(scan_matched_incre_pose, wheel_diff_model.ReadLastPose().pose_)) {
+                    //         laser_wheel_param_ = laser_wheel_calib_.GetParam();  
+                    //         wheel_calib_ = false;  
+                    //         last_wheel_pose.pose_ = estimated_odom_pose;
+                    //         std::cout << msa2d::color::GREEN << "激光-轮速标定完成！外参 x: " << laser_wheel_param_.x
+                    //             << ", y: " << laser_wheel_param_.y << ",theta: " << laser_wheel_param_.theta << ", 尺度 rot_scale: " 
+                    //             << laser_wheel_param_.rot_scale << ",trans_scale: " << laser_wheel_param_.trans_scale 
+                    //             << msa2d::color::RESET << std::endl;
+                    //     }  
+                    // }
                     // 针对IMU  
                     if (!system_initialized_) {
                         systemInit(new_estimate_laserOdom_pose, imu_selected, curr_laser_ptr->end_time_);
@@ -419,6 +425,9 @@ void FrontEndEstimator::run() {
                     }
                 } else {
                     spdlog::info("姿态倾斜过大！");
+                    std::cout << "姿态倾斜过大！" << std::endl;
+                    std::cout << "std::fabs(variation_roll_): " << std::fabs(variation_roll_) <<
+                        ",std::fabs(variation_pitch_): " << std::fabs(variation_pitch_) << std::endl;
                 }
 
                 if (reset_flag_) {
@@ -800,7 +809,8 @@ void FrontEndEstimator::systemInit(const msa2d::Pose2d& laser_pose,
                 work_mode = MODE::lio; 
                 origin_R_gb_ = sensor_param_.imu_.R_gb_;  
                 std::cout << msa2d::color::GREEN << "IMU初始化成功, 角速度bias: " 
-                    << sensor_param_.imu_.gyro_bias_.transpose() << ", 姿态角 pitch: " << origin_pitch_
+                    << sensor_param_.imu_.gyro_bias_.transpose() << ",加速度scale: " << sensor_param_.imu_.acc_scale_
+                    << ", 姿态角 pitch: " << origin_pitch_
                     << ", roll: " << origin_roll_ << msa2d::color::RESET << std::endl;
             }
         }
@@ -834,6 +844,7 @@ bool FrontEndEstimator::syncSensorData(const msa2d::sensor::LaserScan::Ptr& lase
                                                                                         std::deque<msa2d::sensor::ImuData>& imu_container) {
     static bool wheel_extract_finish = false;
     static bool imu_extract_finish = false; 
+    std::cout << "laser_ptr->start_time_: " << laser_ptr->start_time_ << ",laser_ptr->end_time_: " << laser_ptr->end_time_ << std::endl;
     // 提取轮速数据
     std::cout << "extract wheel ... " << wheel_extract_finish << std::endl;
     wheel_sm_.lock();
@@ -1070,9 +1081,15 @@ void FrontEndEstimator::simpleAttitudeEstimation(const msa2d::sensor::ImuData& c
         // test_G_R_I_ = sensor_param_.imu_.R_gb_; 
         return;  
     }
-
+    if (curr_data.time_stamp_ <= last_attitude_predict_time_) {
+        return;  
+    }
+    // std::cout << "curr_data.time_stamp_: " << curr_data.time_stamp_ << std::endl;
+    // std::cout << "last_attitude_predict_time_: " << last_attitude_predict_time_ << std::endl;
     const Eigen::Vector3d unbiased_gyro = curr_data.gyro_ - sensor_param_.imu_.gyro_bias_;   // 去偏置 
+    // std::cout << "unbiased_gyro: " << unbiased_gyro.transpose() << std::endl;
     const Eigen::Vector3d angle_vec = unbiased_gyro * (curr_data.time_stamp_ - last_attitude_predict_time_);
+    // std::cout << "angle_vec: " << angle_vec.transpose() << std::endl;
     const double angle = angle_vec.norm();
     const Eigen::Vector3d axis = angle_vec / angle;
     Eigen::Matrix3d delta_rot = Eigen::AngleAxisd(angle, axis).toRotationMatrix();
@@ -1082,7 +1099,7 @@ void FrontEndEstimator::simpleAttitudeEstimation(const msa2d::sensor::ImuData& c
     // 由陀螺仪观测出来的姿态角
     attitude_roll_ = atan2(sensor_param_.imu_.R_gb_(2, 1), sensor_param_.imu_.R_gb_(2, 2));
     attitude_pitch_ = asin(-sensor_param_.imu_.R_gb_(2, 0)); 
-
+    // std::cout << "predict attitude_roll_: " << attitude_roll_ << ", attitude_pitch_:" << attitude_pitch_ << std::endl;
     /**
      * @brief 在线标定陀螺仪bias
      * 测试：使用在线标定，15min 角度最大漂移0.1rad
@@ -1112,7 +1129,9 @@ void FrontEndEstimator::simpleAttitudeEstimation(const msa2d::sensor::ImuData& c
     //                {ori_gyro_pitch_, curr_data.time_stamp_} , {"gyro_pitch_", "time"});
 
     // 重力校正
-    float acc_v = curr_data.acc_.norm();
+    Eigen::Vector3d acc = curr_data.acc_ * sensor_param_.imu_.acc_scale_;   
+    float acc_v = acc.norm();
+    // std::cout << "acc_v: " << acc_v << std::endl;
     // 加速度不能和重力相差太大  
     if (std::fabs(acc_v - 9.8) < 0.3 * 9.8) {
         double correct_delta_t = curr_data.time_stamp_ - last_attitude_update_time_;
@@ -1122,8 +1141,9 @@ void FrontEndEstimator::simpleAttitudeEstimation(const msa2d::sensor::ImuData& c
             float time_ratio = 1 - std::exp(-correct_delta_t / 0.5);     // 距离上一次校正的时间间隔越大   越接近1
             // std::cout << "correct_delta_t: " << correct_delta_t << ", time_ratio: " << time_ratio << std::endl;
             // 由重力观测出姿态角
-            float gravity_pitch = -std::asin(curr_data.acc_[0] / 9.8); 
-            float gravity_roll = std::atan2(curr_data.acc_[1], curr_data.acc_[2]); 
+            float gravity_pitch = -std::asin(acc[0] / 9.81); 
+            float gravity_roll = std::atan2(acc[1], acc[2]); 
+            // std::cout << "gravity_pitch: " << gravity_pitch << ", gravity_roll:" << gravity_roll << std::endl;
             // 重力解算出来的结果与陀螺仪解算出来的结果相差不能太大(5度)
             // 否则由与短时间更加信任陀螺仪，所以认为重力观测不准
             if (std::fabs(attitude_roll_ - gravity_roll) < 0.08 && std::fabs(attitude_pitch_ - gravity_pitch) < 0.08) {
@@ -1143,9 +1163,8 @@ void FrontEndEstimator::simpleAttitudeEstimation(const msa2d::sensor::ImuData& c
             }
         }
     } else {
-        // std::cout << msa2d::color::RED << "acc_v too large" << std::endl;
+        std::cout << msa2d::color::RED << "acc_v too large" << std::endl;
     }
-
     // Eigen::Matrix3d rotation_matrix = sensor_param_.imu_.R_gb_;
     // // float ori_roll_ = atan2(rotation_matrix(2, 1), rotation_matrix(2, 2)) - sensor_param_.imu_.original_roll_;
     // // float ori_pitch_ = asin(-rotation_matrix(2, 0)) - sensor_param_.imu_.original_pitch_;

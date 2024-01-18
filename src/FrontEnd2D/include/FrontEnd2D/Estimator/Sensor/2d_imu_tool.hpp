@@ -13,6 +13,7 @@ struct ImuParam {
     // float original_pitch_;    
     // float original_roll_;  
     Eigen::Matrix3d R_gb_;     //   I -> Global的旋转矩阵
+    float acc_scale_ = 1.0f;   
 };
 
 class ImuTool2D {
@@ -108,6 +109,7 @@ private:
                     std::fabs(avg_gyro_[2]) < 1e-1 && std::fabs(var_gyro_[0]) < 1e-4) {
                 param.gyro_bias_ = avg_gyro_;  
                 param.R_gb_ = getRotationFromGravity(avg_acc_);  
+                param.acc_scale_ = 9.81 / avg_acc_.norm();  
                 // 为了在线估计陀螺仪bias的任务，这里需要对下面数据进行初始化
                 static_init_N_ = 1; 
                 avg_gyro_ = {0.0, 0.0, 0.0};

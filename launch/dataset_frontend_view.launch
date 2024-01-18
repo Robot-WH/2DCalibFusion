@@ -18,7 +18,7 @@
         <param name="tracking_frame" value="base_link"/>
 
         <param name="scan_topic" value="laser_scan"/>
-        <param name="wheel_topic" value="odom"/>
+        <param name="wheel_topic" value="odomq"/>
         <param name="imu_topic" value="imu"/>
         <param name="scan_frame" value="front_laser_link"/>
         <param name="use_max_scan_range" value="20"/>
